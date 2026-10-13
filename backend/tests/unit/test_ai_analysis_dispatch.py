@@ -17,20 +17,26 @@ from app.services.ai_analysis_tool import AIAnalysisTool
 ])
 async def test_gemini_analysis_contract(monkeypatch, payload, valid):
     from app.services import ai_service as module
+    from app.ai.providers.gemini import ProviderFailure
+    from app.schemas.ai import AIIntentResult
+    from pydantic import ValidationError
     monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
     monkeypatch.setattr(module.settings, "GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(module.genai, "configure", lambda **kwargs: None)
-    model = SimpleNamespace(generate_content_async=AsyncMock(return_value=SimpleNamespace(text=payload)))
-    monkeypatch.setattr(module.genai, "GenerativeModel", lambda **kwargs: model)
+    async def fake_generate(*args, **kwargs):
+        try:
+            return AIIntentResult.model_validate_json(payload)
+        except ValidationError as exc:
+            raise ProviderFailure("SCHEMA_VALIDATION_FAILED") from exc
+    model = AsyncMock(side_effect=fake_generate)
+    monkeypatch.setattr(module, "generate_json", model)
     if valid:
         assert await AIService._classify_free_intent("phân tích báo cáo") == "ANALYZE_REPORT"
     else:
         with pytest.raises(HTTPException) as error:
             await AIService._classify_free_intent("phân tích báo cáo")
         assert error.value.status_code == 503
-    options = model.generate_content_async.call_args.kwargs
-    assert options["generation_config"]["response_mime_type"] == "application/json"
-    assert options["request_options"]["retry"] is None
+    assert model.call_args.args[3] is AIIntentResult
+    assert model.call_args.kwargs["max_tokens"] == 512
 
 
 @pytest.mark.asyncio

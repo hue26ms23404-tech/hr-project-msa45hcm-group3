@@ -87,7 +87,8 @@ class AIReportDraftService:
         AIDraftService._validate_command_and_params("DRAFT_REPORT", params)
         AIReportDraftService.validate_access(user, params)
         missing = [key for key in REQUIRED if key not in params]
-        draft = await AIDraftService.update_draft(db, draft.draft_id, user.user_account_id, params, missing)
+        if answers or missing != draft.missing_fields:
+            draft = await AIDraftService.update_draft(db, draft.draft_id, user.user_account_id, params, missing)
         return await AIReportDraftService.finish_or_ask(db, user, draft)
 
     @staticmethod

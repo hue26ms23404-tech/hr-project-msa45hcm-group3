@@ -44,6 +44,11 @@ _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,100}$")
 _request_id = ContextVar("ai_request_id", default=None)
 
 
+def current_request_id() -> str | None:
+    """Return the current audited request ID without creating a new one."""
+    return _request_id.get()
+
+
 @contextmanager
 def request_context(request_id):
     token = _request_id.set(request_id)

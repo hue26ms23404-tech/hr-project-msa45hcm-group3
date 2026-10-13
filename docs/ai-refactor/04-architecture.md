@@ -1,0 +1,9 @@
+# Implemented AI architecture
+
+`AIChatModal` sends typed requests to `/api/v1/ai/chat`; `get_current_user` reloads the HR actor. The audited endpoint passes the actor, roles and account-owned draft reference to `app/ai/orchestrator.py`. The orchestrator selects the existing owner-bound draft, report flow, deterministic lookup, registered classified tool or permission-filtered knowledge path. `AIService.process_chat()` delegates to it for compatibility with existing callers.
+
+`app/ai/tool_registry.py` maps validated intent enums to stable tool IDs, `AIChatRequest` input schema, required capabilities and fixed handlers. The model cannot name arbitrary functions, routes or SQL. The registry uses `AIEmployeeTool`, `AIKnowledgeTool` and the existing draft service. Reports continue through `AIReportDraftService`, `ReportRunService`, `report_catalog` and their existing scope checks. Leave/fix actions prepare a draft for HR form review; Gemini does not commit a leave or attendance transaction.
+
+`app/ai/parsing/dates.py` resolves deterministic dates and optionally calls `app/ai/providers/gemini.py`; report filters and policy grounding use the same provider boundary. The provider owns SDK clients, structured output validation and sanitized diagnostic categories. `app/core/authorization.py` is the shared role/capability source; resource and document SQL filters remain in their business services. No database table, migration or report template was changed.
+
+The router still contains legacy explicit report and form fallback branches for existing callers. New classified tools can be registered without adding another branch to `AIService.process_chat()`, but a future cleanup could move more of those explicit branches into focused handlers after end-to-end database evidence. This refactor intentionally retains them rather than deleting established workflows.

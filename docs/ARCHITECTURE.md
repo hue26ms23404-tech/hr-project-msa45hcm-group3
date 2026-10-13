@@ -155,6 +155,8 @@ Toàn bộ quy tắc nghiệp vụ được cô lập trong các Service độc 
 * **LeaveService:** Thẩm định đơn nghỉ phép/remote theo buổi hoặc ngày, quản lý hạn mức phép năm và kiểm soát thẩm quyền xét duyệt của Quản lý trực tiếp.
 * **PayrollService:** Tổng hợp ngày công thực tế, tính toán lương Gross/Net, các khoản trích nộp bảo hiểm bắt buộc, thuế TNCN và kết xuất file Excel bảng lương.
 * **AIService:** Phân tích ý định câu hỏi, nạp ngữ cảnh dữ liệu cá nhân của nhân viên và tích hợp mô hình ngôn ngữ lớn (LLM).
+  * `app/ai/orchestrator.py` định tuyến chat; `AIService.process_chat()` là facade tương thích. `app/ai/tool_registry.py` ánh xạ intent đã kiểm tra sang tool/capability cố định, không gọi lại `process_chat()` để phân loại. `app/ai/parsing/dates.py` trả trạng thái ngày có kiểu và ưu tiên quy tắc; chỉ gửi cụm ngày đã rút gọn cho provider khi cần. `app/ai/providers/gemini.py` là nơi duy nhất tạo client `google-genai`, giới hạn thời gian/token và xác thực JSON bằng Pydantic. Nháp qua `AIDraftService`, dữ liệu qua các HR tool hiện hữu.
+  * `app/core/authorization.py` đọc role assignment từ tài khoản HR đã xác thực và cấp capability từ role đã biết; role lạ không thêm quyền. Scope, chủ sở hữu báo cáo/nháp và quyền tài liệu được kiểm ở dịch vụ/SQL. Log provider chỉ ghi request ID, operation, model, thời gian và mã kết quả; không ghi prompt, key, lý do nghỉ hoặc response thô. Không có migration AI mới.
 
 #### 4.4. Tầng Lưu trữ Dữ liệu (Data Persistence Layer)
 * **Cơ sở dữ liệu:** PostgreSQL 16 lưu trữ dữ liệu có cấu trúc, quan hệ chặt chẽ và toàn vẹn dữ liệu ACID.

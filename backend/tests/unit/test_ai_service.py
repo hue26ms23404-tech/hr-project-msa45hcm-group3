@@ -265,8 +265,10 @@ async def test_draft_followup_uses_owner_bound_state_and_asks_next_missing_field
 
 @pytest.fixture
 def context(monkeypatch):
+    from app.services.ai_employee_tool import AIEmployeeTool
     value = {"today": "2026-10-05", "remaining_leave_days": "0.50", "present_days": 2, "incomplete_dates": ["2026-10-02"], "leave_types": [{"id": 11, "code": "ANNUAL", "name": "Phép năm"}, {"id": 12, "code": "UNPAID", "name": "Không lương"}]}
     monkeypatch.setattr(AIService, "get_employee_context", AsyncMock(return_value=value))
+    monkeypatch.setattr(AIEmployeeTool, "get_context", AsyncMock(return_value=value))
     monkeypatch.setattr("app.services.ai_service.business_today", lambda: date(2026, 10, 5))
     return value
 
@@ -401,19 +403,20 @@ async def test_gemini_timeout_and_ungrounded_output_fall_back(context, monkeypat
     }]))
     monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
     monkeypatch.setattr(module.settings, "GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(module.genai, "configure", lambda **kwargs: None)
-    model = SimpleNamespace(generate_content_async=AsyncMock(side_effect=asyncio.TimeoutError))
-    monkeypatch.setattr(module.genai, "GenerativeModel", lambda **kwargs: model)
+    from app.ai.providers.gemini import ProviderFailure
+    generate = AsyncMock(side_effect=ProviderFailure("PROVIDER_TIMEOUT"))
+    monkeypatch.setattr(module, "generate_json", generate)
     request = AIChatRequest(message="giải thích giờ làm việc", conversation_history=[AIChatMessage(role="user", content="employee id 12345 private history")])
     result = await AIService.process_chat(db, 7, request, {"EMPLOYEE"}, owner_user_account_id=7)
     assert result.answer_mode == "RAG" and result.sources[0].document_id == 1
-    assert model.generate_content_async.call_count == 1
-    assert model.generate_content_async.call_args.kwargs["request_options"]["retry"] is None
-    assert model.generate_content_async.call_args.kwargs["generation_config"]["max_output_tokens"] == 1536
-    provider_prompt = model.generate_content_async.call_args.args[0]
+    assert generate.call_count == 1
+    assert generate.call_args.kwargs["max_tokens"] == 1536
+    provider_prompt = generate.call_args.args[1]
     assert '"personal_context"' not in provider_prompt
     assert "private history" not in provider_prompt and "12345" not in provider_prompt
-    model.generate_content_async = AsyncMock(return_value=SimpleNamespace(text='{"statements":[{"source":1,"text":"ngoài kiến thức","evidence":"Không nằm trong nguồn"}]}'))
+    from app.schemas.ai import AIGroundedAnswer
+    generate.side_effect = None
+    generate.return_value = AIGroundedAnswer(statements=[{"source": 1, "text": "ngoài kiến thức", "evidence": "Không nằm trong nguồn"}])
     result = await AIService.process_chat(db, 7, request, {"EMPLOYEE"}, owner_user_account_id=7)
     assert result.answer_mode == "RAG" and "ngoài kiến thức" not in result.reply
 
@@ -424,19 +427,16 @@ async def test_free_intent_classifier_uses_closed_schema_and_redacts_personal_fi
 
     monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
     monkeypatch.setattr(module.settings, "GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(module.genai, "configure", lambda **kwargs: None)
-    model = SimpleNamespace(generate_content_async=AsyncMock(return_value=SimpleNamespace(text='{"intent":"DRAFT_LEAVE"}')))
-    monkeypatch.setattr(module.genai, "GenerativeModel", lambda **kwargs: model)
+    from app.schemas.ai import AIIntentResult
+    generate = AsyncMock(return_value=AIIntentResult(intent="DRAFT_LEAVE"))
+    monkeypatch.setattr(module, "generate_json", generate)
     result = await AIService._classify_free_intent("Xin nghỉ 2026-10-12, tên tôi là Nguyễn An, email ann@example.com, lý do: khám bệnh")
     assert result == "DRAFT_LEAVE"
-    assert model.generate_content_async.call_count == 1
-    assert model.generate_content_async.call_args.kwargs["request_options"]["retry"] is None
-    assert model.generate_content_async.call_args.kwargs["generation_config"]["max_output_tokens"] == 512
-    schema = model.generate_content_async.call_args.kwargs["generation_config"]["response_schema"]
-    assert schema["required"] == ["intent"]
-    assert "ANALYZE_REPORT" in schema["properties"]["intent"]["enum"]
-    assert model.generate_content_async.call_args.kwargs["request_options"]["timeout"] == module.settings.GEMINI_INTENT_TIMEOUT_SECONDS
-    payload = model.generate_content_async.call_args.args[0]
+    assert generate.call_count == 1
+    assert generate.call_args.kwargs["max_tokens"] == 512
+    assert generate.call_args.args[3] is AIIntentResult
+    assert generate.call_args.kwargs["timeout"] == module.settings.GEMINI_INTENT_TIMEOUT_SECONDS
+    payload = generate.call_args.args[1]
     assert "2026-10-12" not in payload
     assert "Nguyễn An" not in payload
     assert "ann@example.com" not in payload
@@ -462,8 +462,9 @@ async def test_gemini_disabled_even_when_key_is_configured(monkeypatch):
     from app.services import ai_service as module
     monkeypatch.setattr(module.settings, "GEMINI_ENABLED", False)
     monkeypatch.setattr(module.settings, "GEMINI_API_KEY", "test-key")
+    from app.ai.providers import gemini
     provider = AsyncMock()
-    monkeypatch.setattr(module.genai, "GenerativeModel", provider)
+    monkeypatch.setattr(gemini.genai, "Client", provider)
     with pytest.raises(HTTPException) as exc:
         await AIService._classify_free_intent("help with HR")
     assert exc.value.detail == "AI_UNAVAILABLE"
@@ -541,35 +542,38 @@ def test_unrecognized_date_answer_does_not_become_reason():
     ('{"date":"2026-09-28","reason":"injected"}', None),
 ])
 async def test_gemini_date_parser_has_closed_output_and_minimal_context(monkeypatch, payload, expected):
+    from app.ai.parsing import dates
+    from app.ai.providers.gemini import ProviderFailure
+    from app.schemas.ai import AIChatDateResult
+    from pydantic import ValidationError
     from app.services import ai_service as module
-    monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
-    monkeypatch.setattr(module.settings, "GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(module, "business_today", lambda: date(2026, 10, 5))
-    monkeypatch.setattr(module.genai, "configure", lambda **kwargs: None)
-    model = SimpleNamespace(generate_content_async=AsyncMock(return_value=SimpleNamespace(text=payload)))
-    monkeypatch.setattr(module.genai, "GenerativeModel", lambda **kwargs: model)
-    result = await AIService._interpret_chat_date("thu 2 tuan truoc, private@example.test, ly do kham benh")
+    async def fake_generate(*args, **kwargs):
+        try:
+            return AIChatDateResult.model_validate_json(payload)
+        except ValidationError as exc:
+            raise ProviderFailure("SCHEMA_VALIDATION_FAILED") from exc
+    generate = AsyncMock(side_effect=fake_generate)
+    monkeypatch.setattr(dates, "generate_json", generate)
+    result = await AIService._interpret_chat_date("ngay thu hai cua tuan lien truoc, private@example.test, ly do kham benh")
     assert result == expected
-    prompt = model.generate_content_async.call_args.args[0]
-    assert "2026-10-05" in prompt and "thu 2 tuan truoc" in prompt
+    prompt = generate.call_args.args[1]
+    assert "2026-10-05" in prompt and "thu hai cua tuan lien truoc" in prompt
     assert "private" not in prompt and "kham" not in prompt
-    assert model.generate_content_async.call_args.kwargs["request_options"]["retry"] is None
+    assert generate.call_args.kwargs["timeout"] == 5
 
 
 @pytest.mark.asyncio
 async def test_gemini_date_failure_and_disabled_provider_keep_date_missing(monkeypatch):
     from app.services import ai_service as module
+    from app.ai.parsing import dates
+    from app.ai.providers.gemini import ProviderFailure
     monkeypatch.setattr(module.settings, "GEMINI_ENABLED", False)
-    provider = AsyncMock()
-    monkeypatch.setattr(module.genai, "GenerativeModel", provider)
-    assert await AIService._interpret_chat_date("thu 2 tuan truoc") is None
-    provider.assert_not_called()
+    assert await AIService._interpret_chat_date("thu hai cua tuan lien truoc") is None
     monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
     monkeypatch.setattr(module.settings, "GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(module.genai, "configure", lambda **kwargs: None)
-    monkeypatch.setattr(module.genai, "GenerativeModel", lambda **kwargs: SimpleNamespace(
-        generate_content_async=AsyncMock(side_effect=asyncio.TimeoutError)))
-    assert await AIService._interpret_chat_date("thu 2 tuan truoc") is None
+    monkeypatch.setattr(dates, "generate_json", AsyncMock(side_effect=ProviderFailure("PROVIDER_TIMEOUT")))
+    assert await AIService._interpret_chat_date("thu hai cua tuan lien truoc") is None
 
 
 @pytest.mark.asyncio
@@ -581,8 +585,10 @@ async def test_gemini_date_is_applied_only_to_date_field_in_owner_draft(monkeypa
     monkeypatch.setattr(AIDraftService, "get_draft", AsyncMock(return_value=draft))
     update = AsyncMock(return_value=draft)
     monkeypatch.setattr(AIDraftService, "update_draft", update)
-    interpret = AsyncMock(return_value="2026-09-28")
-    monkeypatch.setattr(AIService, "_interpret_chat_date", interpret)
+    from app.ai.parsing import dates
+    from app.schemas.ai import AIChatDateResult
+    interpret = AsyncMock(return_value=AIChatDateResult(date="2026-09-28"))
+    monkeypatch.setattr(dates, "generate_json", interpret)
     result = await AIService.process_chat(None, 7,
         AIChatRequest(message="thu hai cua tuan lien truoc", draft_id=draft.draft_id, draft_revision=1),
         {"EMPLOYEE"}, owner_user_account_id=9)
@@ -625,8 +631,10 @@ async def test_initial_leave_request_keeps_date_and_type_and_combines_remaining_
 
 @pytest.mark.asyncio
 async def test_initial_draft_uses_gemini_for_date_when_local_parser_has_no_answer(monkeypatch):
-    interpret = AsyncMock(return_value="2026-11-10")
-    monkeypatch.setattr(AIService, "_interpret_chat_date", interpret)
+    from app.ai.parsing import dates
+    from app.schemas.ai import AIChatDateResult
+    interpret = AsyncMock(return_value=AIChatDateResult(date="2026-11-10"))
+    monkeypatch.setattr(dates, "generate_json", interpret)
     answers = await AIService._draft_answers_with_date("DRAFT_LEAVE", "xin nghi ngay muoi thang sau")
     assert answers == {"leave_date": "2026-11-10"}
     interpret.assert_awaited_once()
@@ -636,8 +644,9 @@ async def test_initial_draft_uses_gemini_for_date_when_local_parser_has_no_answe
 async def test_invalid_explicit_calendar_date_is_not_repaired_by_gemini(monkeypatch):
     from app.services import ai_service as module
     monkeypatch.setattr(module, "business_today", lambda: date(2026, 10, 5))
-    interpret = AsyncMock(return_value="2026-11-30")
-    monkeypatch.setattr(AIService, "_interpret_chat_date", interpret)
+    from app.ai.parsing import dates
+    interpret = AsyncMock()
+    monkeypatch.setattr(dates, "generate_json", interpret)
     assert await AIService._draft_answers_with_date("DRAFT_LEAVE", "ngay 31 thang sau", ["leave_date"]) == {}
     interpret.assert_not_called()
 

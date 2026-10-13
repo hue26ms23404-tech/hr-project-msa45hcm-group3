@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.api import api_router
 from app.core.ai_errors import install_ai_errors
+from app.ai.providers.gemini import readiness
+import json
+import logging
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -10,6 +13,11 @@ app = FastAPI(
     docs_url=f"{settings.API_V1_PREFIX}/docs",
     redoc_url=f"{settings.API_V1_PREFIX}/redoc",
 )
+
+
+@app.on_event("startup")
+async def log_ai_readiness():
+    logging.getLogger(__name__).info(json.dumps({"event": "ai_provider_readiness", **readiness()}))
 install_ai_errors(app, (f"{settings.API_V1_PREFIX}/ai", f"{settings.API_V1_PREFIX}/reports"))
 
 # Set up CORS

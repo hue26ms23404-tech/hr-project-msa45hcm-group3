@@ -31,7 +31,15 @@ cp .env.example .env
 cp .env.example backend/.env
 ```
 
-*File `.env` mặc định đã có sẵn các thông số kết nối chuẩn cục bộ (PostgreSQL, Secret Keys, Kiosk Key). Bạn chỉ cần cập nhật `GEMINI_API_KEY` nếu muốn kết nối với Google Gemini LLM.*
+Chatbox dùng cấu hình Gemini sẵn có trong `backend/.env`:
+
+```dotenv
+GEMINI_ENABLED=true
+GEMINI_API_KEY=your-api-key
+GEMINI_MODEL_NAME=gemini-3.5-flash-lite
+```
+
+Không có migration AI mới. Nếu không có key hoặc `GEMINI_ENABLED=false`, chat vẫn trả lời bằng quy tắc và tài liệu nội bộ khi hiểu được câu hỏi. Mã model trong ví dụ là cấu hình override; hãy xác minh model với chính API key và revision định triển khai, không tự thay model khi probe lỗi. Chạy `python -B -m app.ai.providers.diagnose` tại `backend/` để xem cấu hình an toàn; thêm `--live` chỉ khi được phép gọi provider có thể tính phí. Các lệnh migration/seed ở dưới chỉ chạy trên DB phù hợp.
 
 ---
 

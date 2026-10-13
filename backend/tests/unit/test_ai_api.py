@@ -155,7 +155,7 @@ async def test_suggestion_actions_reference_the_relevant_published_section(api_c
     app, _, db = api_context
     codes = ["LEAVE.ANNUAL", "ATTENDANCE.FIX", "REPORT.ACCESS", "LEAVE.REQUEST", "REPORT.CATALOG"]
     rows = [{"document_id": index + 1, "version_id": index + 10, "title": "Published demo", "section_id": index + 20, "section_code": code, "heading": code, "page_start": 2, "page_end": 2} for index, code in enumerate(codes)]
-    db.execute.side_effect = [SimpleNamespace(mappings=lambda row=row: SimpleNamespace(first=lambda: row)) for row in rows]
+    db.execute.return_value = SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: rows))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get('/ai/suggestions')
     assert response.status_code == 200
@@ -165,6 +165,7 @@ async def test_suggestion_actions_reference_the_relevant_published_section(api_c
     assert "my_attendance_report" not in entries
     assert "tham khảo mục LEAVE.REQUEST" in entries["draft_leave"]["prompt"]
     assert "payroll_summary" not in entries
+    assert db.execute.call_count == 1
     for call in db.execute.call_args_list:
         query = str(call.args[0].compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
         assert "PUBLISHED" in query and "minimum_role IN ('EMPLOYEE')" in query
@@ -321,7 +322,7 @@ async def test_draft_mapping_validation_happens_before_replacing_sections(monkey
 async def test_chat_identity_and_roles_ignore_client_claims(api_context, monkeypatch):
     app, _, _ = api_context
     process = AsyncMock(return_value=AIChatResponse(reply="OK"))
-    monkeypatch.setattr(ai.AIService, "process_chat", process)
+    monkeypatch.setattr(ai.ChatOrchestrator, "process_chat", process)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post('/ai/chat', json={"message": "Hi", "employee_id": 99, "roles": ["ADMIN"]})
         assert response.status_code == 422

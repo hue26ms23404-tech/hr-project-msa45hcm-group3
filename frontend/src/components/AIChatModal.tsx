@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Modal, Input, Button, Dropdown, Card, Spin, Space, Typography, message } from 'antd';
 import { SendOutlined, RobotOutlined, UserOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import api from '../api/client';
+import { acceptsServerSuggestions, actorChanged, chatFailureState, readableISODate } from '../api/aiChatState';
 import { ChatReportPreview } from './ChatReportPreview';
 import { Link, useNavigate } from 'react-router-dom';
 import type { AIChatAction, AIChatResponse, AISource, AISuggestion, AIInputOption, AIDraftInputs, AIChatRequest } from '../types/ai';
@@ -24,6 +25,7 @@ interface AIChatModalProps {
 export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const actorId = user?.user_account_id;
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
@@ -42,8 +44,13 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [inputOptions, setInputOptions] = useState<AIInputOption[]>([]);
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState(false);
+  const [suggestionsRetry, setSuggestionsRetry] = useState(0);
+  const [retryMessage, setRetryMessage] = useState<{ text: string; startNew: boolean; suggestionId?: string; inputs?: AIDraftInputs } | null>(null);
   const [reference, setReference] = useState<{ title: string; content: string; source_url?: string | null } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const actorIdRef = useRef(actorId);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -56,32 +63,41 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
   }, [open, messages]);
 
   useEffect(() => {
-    if (open) {
-      const roles = user?.roles || [];
-      const valid = roles.length > 0 && roles.every((role) => ['EMPLOYEE', 'MANAGER', 'HR', 'ADMIN'].includes(role));
-      const personal = valid && typeof user?.employee_id === 'number' && user.employee_id > 0;
-      const fallback: AISuggestion[] = personal ? [
-        { suggestion_id: 'leave_balance', prompt: 'Số dư phép năm của tôi còn bao nhiêu?', catalog_version: 'v1' },
-        { suggestion_id: 'draft_leave', prompt: 'Tôi muốn xin nghỉ phép', catalog_version: 'v1' },
-        { suggestion_id: 'attendance_fix', prompt: 'Tạo giải trình chấm công', catalog_version: 'v1' },
-      ] : [];
-      if (personal && roles.some((role) => ['MANAGER', 'HR', 'ADMIN'].includes(role))) fallback.push({ suggestion_id: 'my_attendance_report', prompt: 'Tạo báo cáo công của tôi tháng này', catalog_version: 'v1' });
-      if (valid && roles.some((role) => ['HR', 'ADMIN'].includes(role))) fallback.push({ suggestion_id: 'knowledge_admin', prompt: 'Mở quản lý tài liệu nội quy', catalog_version: 'v1' });
-      setSuggestions(fallback);
-      let cancelled = false;
-      api.get<AISuggestion[]>('/ai/suggestions').then((res) => {
-        if (cancelled) return;
-        if (Array.isArray(res.data)) setSuggestions(res.data);
-      }).catch(() => {
-        // Cached actor capabilities only shape UI; the server still authorizes.
-      });
-      return () => { cancelled = true; };
+    if (actorChanged(actorIdRef.current, actorId)) {
+      actorIdRef.current = actorId;
+      setMessages([]);
+      setActiveDraftId(null);
+      setActiveDraftRevision(null);
+      setMissingFields([]);
+      setInputOptions([]);
+      setLastReportRunId(null);
+      setEditingRunId(null);
+      setPreviewRunId(null);
+      setRetryMessage(null);
     }
-  }, [open, user]);
+  }, [actorId]);
+
+  useEffect(() => {
+    if (!open || actorId == null) return;
+    let cancelled = false;
+    setSuggestions([]);
+    setSuggestionsError(false);
+    setSuggestionsLoading(true);
+    api.get<AISuggestion[]>('/ai/suggestions').then((res) => {
+      if (!cancelled && acceptsServerSuggestions(res.data)) setSuggestions(res.data);
+      else if (!cancelled) setSuggestionsError(true);
+    }).catch(() => {
+      if (!cancelled) setSuggestionsError(true);
+    }).finally(() => {
+      if (!cancelled) setSuggestionsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [open, actorId, suggestionsRetry]);
 
   const handleSendMessage = async (textToSend?: string, startNew = false, suggestionId?: string, inputs?: AIDraftInputs) => {
     const text = textToSend || inputVal.trim();
     if (!text || loading) return;
+    setRetryMessage(null);
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -93,6 +109,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
     setMessages((prev) => [...prev.map((item) => ({ ...item, action: undefined })), userMsg]);
     setInputVal('');
     setLoading(true);
+    const requestActorId = actorId;
 
     try {
       const history = messages.slice(-6).map((m) => ({
@@ -110,6 +127,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
         ...(activeDraftId && !startNew ? { draft_id: activeDraftId, ...(activeDraftRevision ? { draft_revision: activeDraftRevision } : {}) } : {}),
       };
       const res = await api.post<AIChatResponse>('/ai/chat', request);
+      if (actorIdRef.current !== requestActorId) return;
       if (res.data.action?.action_type === 'OPEN_REPORT' && res.data.action.data.run_id) {
         setLastReportRunId(res.data.action.data.run_id);
         setPreviewRunId(res.data.action.data.run_id); setEditingRunId(null);
@@ -118,6 +136,9 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       setActiveDraftRevision(res.data.draft_revision || null);
       setMissingFields(res.data.missing_fields || []);
       setInputOptions(res.data.input_options || []);
+      if (res.data.message_code === 'AI_UNAVAILABLE') {
+        setRetryMessage({ text, startNew, suggestionId, inputs });
+      }
 
       const aiMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -130,10 +151,12 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
 
       setMessages((prev) => [...prev, aiMsg]);
     } catch (err: any) {
+      if (actorIdRef.current !== requestActorId) return;
       const status = err?.response?.status;
       const code = err?.response?.data?.detail;
-      setInputOptions([]);
-      if ([404, 409, 410].includes(status)) { setActiveDraftId(null); setActiveDraftRevision(null); setMissingFields([]); }
+      const failure = chatFailureState(status, code);
+      if (failure.clearDraft) { setActiveDraftId(null); setActiveDraftRevision(null); setMissingFields([]); }
+      if (failure.retryable) setRetryMessage({ text, startNew, suggestionId, inputs });
       const errorMessage = typeof err?.response?.data?.message === 'string' ? err.response.data.message : status === 422
         ? 'Thông tin chưa hợp lệ. Vui lòng kiểm tra các trường được yêu cầu.'
         : status === 403 || code === 'AI_DRAFT_NOT_FOUND'
@@ -307,11 +330,11 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
                       title={msg.action.action_type === 'DRAFT_LEAVE' ? 'Nháp đơn nghỉ phép' : 'Nháp giải trình công'}
                     >
                       {msg.action.action_type === 'DRAFT_LEAVE' && <>
-                        {msg.action.data?.leave_date && <div>Ngày nghỉ: <b>{String(msg.action.data.leave_date).split('-').reverse().join('/')}</b></div>}
+                        {msg.action.data?.leave_date && <div>Ngày nghỉ: <b>{readableISODate(String(msg.action.data.leave_date))}</b></div>}
                         {msg.action.data?.session && <div>Buổi nghỉ: {({ MORNING: 'Buổi sáng', AFTERNOON: 'Buổi chiều', FULL_DAY: 'Cả ngày' } as Record<string, string>)[String(msg.action.data.session)]}</div>}
                       </>}
                       {msg.action.action_type === 'DRAFT_FIX' && <>
-                        {msg.action.data?.work_date && <div>Ngày công: <b>{String(msg.action.data.work_date).split('-').reverse().join('/')}</b></div>}
+                        {msg.action.data?.work_date && <div>Ngày công: <b>{readableISODate(String(msg.action.data.work_date))}</b></div>}
                         {msg.action.data?.event_type && <div>Lượt công: {msg.action.data.event_type === 'CHECK_IN' ? 'Vào làm' : 'Ra về'}</div>}
                         {msg.action.data?.requested_time && <div>Giờ đề nghị: {msg.action.data.requested_time}</div>}
                       </>}
@@ -377,7 +400,12 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       </div>
 
       {/* Suggestions stay collapsed so the conversation remains the focus. */}
-      {!activeDraftId && suggestions.length > 0 && <div style={{ margin: '10px 0 8px', flexShrink: 0 }}>
+      {!activeDraftId && suggestionsLoading && <Typography.Text type="secondary">Đang tải gợi ý...</Typography.Text>}
+      {!activeDraftId && suggestionsError && <Space style={{ margin: '10px 0 8px' }}>
+        <Typography.Text type="secondary">Chưa tải được gợi ý.</Typography.Text>
+        <Button size="small" onClick={() => setSuggestionsRetry((value) => value + 1)}>Thử lại</Button>
+      </Space>}
+      {!activeDraftId && !suggestionsError && suggestions.length > 0 && <div style={{ margin: '10px 0 8px', flexShrink: 0 }}>
         <Dropdown trigger={['click']} placement="topLeft"
           menu={{ items: suggestions.map((suggestion) => ({
             key: suggestion.suggestion_id, label: suggestion.prompt,
@@ -388,6 +416,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
           <Button type="text" size="small" icon={<ThunderboltOutlined />} disabled={loading} style={{ color: '#64748b' }}>Gợi ý câu hỏi</Button>
         </Dropdown>
       </div>}
+      {retryMessage && <Button size="small" onClick={() => void handleSendMessage(retryMessage.text, retryMessage.startNew, retryMessage.suggestionId, retryMessage.inputs)}>Thử lại yêu cầu</Button>}
 
       {activeDraftId && <Space wrap style={{ marginBottom: 8, flexShrink: 0 }}>
         {inputOptions.filter((option) => option.field === missingFields[0]).map((option) => <Button key={`${option.field}-${option.value}`} size="small" disabled={loading} onClick={() => handleSendMessage(option.label, false, undefined, { [option.field]: option.value })}>{option.label}</Button>)}

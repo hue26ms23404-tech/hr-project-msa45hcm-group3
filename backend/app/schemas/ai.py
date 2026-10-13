@@ -186,7 +186,7 @@ class AIChatResponse(BaseModel):
 
     @model_validator(mode="after")
     def derive_status(self):
-        if self.draft_id:
+        if self.draft_id and self.status == "OK":
             self.status = "NEEDS_INPUT"
         elif self.answer_mode == "OUT_OF_SCOPE" and self.status == "OK":
             self.status = "OUT_OF_SCOPE"

@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.models.auth import UserAccount, UserRoleAssignment, Role
+from app.core.authorization import authenticated_roles, has_hr_role
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
 
@@ -58,11 +59,8 @@ async def get_current_user(
 def require_roles(allowed_roles: List[str]):
     """Dependency factory to enforce Role-Based Access Control (RBAC)"""
     async def role_checker(current_user: UserAccount = Depends(get_current_user)) -> UserAccount:
-        user_roles = [assignment.role.role_code for assignment in current_user.role_assignments]
-        # ADMIN has universal access
-        if "ADMIN" in user_roles:
-            return current_user
-        if not any(role in allowed_roles for role in user_roles):
+        user_roles = authenticated_roles(current_user)
+        if not has_hr_role(user_roles, set(allowed_roles)):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Requires one of roles: {', '.join(allowed_roles)}"

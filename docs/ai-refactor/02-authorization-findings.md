@@ -1,0 +1,9 @@
+# Authorization findings and changes
+
+`get_current_user` reloads active account roles from `UserRoleAssignment` and `Role`; JWT identifies the account. At baseline `require_roles` accepted ADMIN plus any extra role, while `ai_access.require_known_role` rejected the entire role set if any code was unknown. The old modal also fabricated suggestions from client role labels.
+
+`app/core/authorization.py` now derives known roles and capabilities from server assignments. `ai_access`, the HR `require_roles` dependency and the AI tool registry use this shared source. ADMIN plus an unrelated role retains known ADMIN permissions; the unrelated role adds none. Unknown-only and no-role accounts are denied. No `USER` alias was added: repository seed data defines `EMPLOYEE`, `MANAGER`, `HR`, `ADMIN`, but deployed `hr_roles` and assignments were not available for read-only verification.
+
+The new tool registry checks capability before executing classified self lookups, drafting or knowledge management. Existing scope and ownership checks remain in `report_catalog`, `ReportRunService`/owner-filtered report runs, `AIDraftService` and `AIKnowledgeTool`. Published/effective/answerable role-filtered document sections are selected before retrieval or Gemini grounding. Tests cover the role matrix, forged client roles, unknown-only denial, report scope denial, owner-bound draft/run SQL and unpublished knowledge; the full database SQL behavior still needs a dedicated PostgreSQL test database.
+
+`GET /ai/suggestions` now uses server roles and one filtered section query, without demo document codes. Missing sections get internal safe reasons (`DOCUMENT_NOT_FOUND`, `NOT_PUBLISHED`, `NOT_EFFECTIVE`, `SECTION_NOT_ANSWERABLE`, `INSUFFICIENT_PERMISSION`); available sections are logged as `AVAILABLE`. The API does not return inaccessible metadata. The modal shows loading/error/retry instead of local role-based suggestions.

@@ -73,6 +73,19 @@ async def test_report_collects_period_then_authorized_scope_before_real_run(monk
 
 
 @pytest.mark.asyncio
+async def test_unresolved_report_followup_preserves_revision(monkeypatch):
+    from app.services import ai_report_draft_service as module
+    draft = SimpleNamespace(draft_id="00000000-0000-4000-8000-000000000000", revision=2,
+                            typed_params={"kind": "ATTENDANCE"}, missing_fields=["start_date", "end_date", "scope"])
+    monkeypatch.setattr(module, "interpret_report_prompt", AsyncMock(return_value={}))
+    update = AsyncMock()
+    monkeypatch.setattr(AIDraftService, "update_draft", update)
+    result = await AIReportDraftService.continue_draft(AsyncMock(), actor(), draft, "chưa rõ", date(2026, 10, 13))
+    assert result.draft_revision == 2 and result.missing_fields == draft.missing_fields
+    update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_report_scope_escalation_rejected_before_persistence():
     db = AsyncMock()
     with pytest.raises(HTTPException) as denied:
@@ -98,7 +111,7 @@ def test_report_fields_and_month_parser_are_closed():
 async def test_common_report_period_is_parsed_without_provider(monkeypatch):
     from app.services import ai_report_interpreter as module
     model = Mock(side_effect=AssertionError("Common filters must stay local"))
-    monkeypatch.setattr(module.genai, "GenerativeModel", model)
+    monkeypatch.setattr(module, "generate_json", model)
     assert await module.GeminiReportInterpreter().interpret("báo cáo công tháng trước", date(2026, 10, 8), actor()) == {}
     model.assert_not_called()
 
@@ -112,17 +125,23 @@ async def test_common_report_period_is_parsed_without_provider(monkeypatch):
 ])
 async def test_report_provider_has_closed_filter_contract(monkeypatch, payload, expected):
     from app.services import ai_report_interpreter as module
+    from app.ai.providers.gemini import ProviderFailure
+    from pydantic import ValidationError
     monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
     monkeypatch.setattr(module.settings, "GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(module.genai, "configure", lambda **kwargs: None)
-    model = SimpleNamespace(generate_content_async=AsyncMock(return_value=SimpleNamespace(text=payload)))
-    monkeypatch.setattr(module.genai, "GenerativeModel", lambda **kwargs: model)
+    async def fake_generate(*args, **kwargs):
+        try:
+            return module.ReportPromptResult.model_validate_json(payload)
+        except ValidationError as exc:
+            raise ProviderFailure("SCHEMA_VALIDATION_FAILED") from exc
+    model = AsyncMock(side_effect=fake_generate)
+    monkeypatch.setattr(module, "generate_json", model)
     result = await module.GeminiReportInterpreter().interpret("lấy kỳ trước đó", date(2026, 10, 8), actor(),
         {"kind":"ATTENDANCE","scope":"SELF","employee_id":99})
     assert result == expected
-    prompt = model.generate_content_async.call_args.args[0]
+    prompt = model.call_args.args[1]
     assert "employee_id" not in prompt and "user_account_id" not in prompt
-    assert model.generate_content_async.call_args.kwargs["request_options"]["retry"] is None
+    assert model.call_args.kwargs["timeout"] == 5
 
 
 @pytest.mark.asyncio
@@ -176,7 +195,7 @@ async def test_next_month_needs_no_provider_and_revision_keeps_scope(monkeypatch
     from datetime import datetime, timedelta, timezone
     from app.services import ai_report_interpreter as module
     provider = Mock(side_effect=AssertionError("Month aliases must run locally"))
-    monkeypatch.setattr(module.genai,"GenerativeModel",provider)
+    monkeypatch.setattr(module,"generate_json",provider)
     assert await module.GeminiReportInterpreter().interpret("đổi sang tháng sau",date(2026,10,8),actor()) == {}
     db = AsyncMock()
     db.scalar.return_value = SimpleNamespace(kind="ATTENDANCE",scope="SELF",status="READY",

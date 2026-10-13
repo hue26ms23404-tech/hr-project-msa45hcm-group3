@@ -20,11 +20,34 @@ Provide a reachable PostgreSQL database and configure:
 - SYNC_DATABASE_URL: `postgresql+psycopg2://USER:PASSWORD@HOST:5432/DB`
 - SECRET_KEY and KIOSK_API_SECRET_KEY: production secrets
 - GEMINI_API_KEY: optional, for the AI provider
+- GEMINI_ENABLED: set `true` only on revisions intended to call Gemini; default `false`
+- GEMINI_MODEL_NAME: verify this exact identifier using the deployed key before use
 
 Use Secret Manager for secrets. Configure Cloud Run connectivity to the database.
 The local docker-compose PostgreSQL service is not deployed by this image.
 Run `alembic upgrade head` as a separate migration job with the same database
 configuration before using the application. Seed demo data only when intended.
+
+Before staging release, compare the intended source commit with the Cloud Build
+FETCHSOURCE commit and the Cloud Run revision's container image digest. Inspect
+environment variable names and nonsecret values, Secret Manager references,
+egress/VPC settings, and database connectivity without printing secret values.
+Enabling Gemini can incur usage; do it explicitly in staging. Retain the previous
+deployable revision for rollback. This AI refactor adds no database migration.
+
+From `backend/` with the revision's effective configuration:
+
+```bash
+python -B -m app.ai.providers.diagnose
+python -B -m app.ai.providers.diagnose --live
+```
+
+The first command reports safe configuration only. `--live` makes bounded,
+potentially billable calls for model access, text generation and structured JSON.
+A model lookup alone does not prove generation. Check logs for
+`SKIPPED_DETERMINISTIC`, `SKIPPED_DISABLED`, `CALLED_SUCCESS`, `CALLED_FAILED`,
+`OUTPUT_REJECTED` and `FALLBACK_USED` on sanitized test requests. Production
+revision, model access, database roles and secret wiring are unverified here.
 
 ## Verify
 

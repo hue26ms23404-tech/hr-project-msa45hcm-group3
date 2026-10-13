@@ -68,6 +68,7 @@ Hệ thống được thiết kế áp dụng cho mô hình doanh nghiệp chu�
 * Hỗ trợ hỏi đáp chính sách nhân sự (giờ giấc, quy chế nghỉ phép, chế độ thai sản/ốm đau, cách tính lương/thuế).
 * Tra cứu dữ liệu cá nhân theo ngữ cảnh thực của nhân viên đang đăng nhập (số dư phép năm còn lại, số ngày công đã tích lũy trong tháng, cảnh báo ngày thiếu chấm công).
 * Hỗ trợ tạo bản nháp đơn xin nghỉ phép và đơn giải trình công qua hội thoại.
+* Chatbox dùng quy tắc cho yêu cầu rõ ràng và chỉ gọi Gemini khi cần phân loại/giải nghĩa hoặc trả lời dựa trên nguồn đã kiểm quyền. Ngày mơ hồ được hỏi lại; nháp do server giữ theo chủ sở hữu, phiên bản và hạn dùng. Đơn mở form để kiểm tra trước khi gửi; báo cáo vẫn dùng preview/run hiện có. Gemini lỗi dùng fallback có ghi mã chẩn đoán nội bộ. Xem [AI Copilot](docs/AI_COPILOT.md).
 
 ---
 
@@ -463,6 +464,8 @@ Toàn bộ API được phục vụ dưới tiền tố `/api/v1`. Các API yêu
 | Phương thức | Endpoint | Quyền hạn | Mô tả nghiệp vụ |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/ai/chat` | Mọi vai trò | Hội thoại hỏi đáp chính sách nhân sự và tra cứu công/phép theo ngữ cảnh |
+
+Chỉ ADMIN/HR/MANAGER được tạo báo cáo theo scope hiện có; JWT luôn quyết định danh tính cá nhân.
 
 ---
 

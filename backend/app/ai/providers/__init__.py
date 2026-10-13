@@ -1,0 +1,1 @@
+"""External text generation boundary."""

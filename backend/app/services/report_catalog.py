@@ -5,6 +5,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from app.services.ai_access import require_known_role, user_roles
+from app.core.authorization import capabilities
 
 
 REPORT_NAMES = {
@@ -30,8 +31,9 @@ def report_catalog(user):
     roles = user_roles(user)
     require_known_role(roles)
     employee = user.employee_id is not None
-    privileged = bool(roles & {"HR", "ADMIN"})
-    reviewer = bool(roles & {"MANAGER", "HR", "ADMIN"})
+    actor_caps = capabilities(roles)
+    privileged = "report.read_company" in actor_caps
+    reviewer = "report.create" in actor_caps
     if not reviewer:
         return {"catalog_version": "v1", "reports": []}
     common_scopes = (["SELF"] if employee else []) + (["DIRECT_REPORTS"] if reviewer and employee else []) + (["COMPANY"] if privileged else [])
