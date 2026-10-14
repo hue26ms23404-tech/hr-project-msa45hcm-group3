@@ -180,7 +180,8 @@ async def test_report_catalog_filters_role_and_matches_shipped_columns(api_conte
     app, user, db = api_context
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get('/reports/catalog')
-        assert response.status_code == 403
+        assert response.status_code == 200
+        assert {item["kind"] for item in response.json()["reports"]} == {"ATTENDANCE", "LEAVE", "ATTENDANCE_FIX", "MY_PAYSLIP"}
         user.role_assignments[0].role.role_code = "MANAGER"
         response = await client.get('/reports/catalog')
         assert response.status_code == 200

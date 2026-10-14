@@ -73,7 +73,7 @@ function AppRoutes() {
         <Route path="leaves" element={<LeavePage />} />
         <Route path="payroll" element={<PayrollPage />} />
         <Route path="kiosk" element={<KioskScanPage />} />
-        <Route path="reports" element={<ProtectedRoute requiredRoles={['MANAGER', 'HR', 'ADMIN']}><Navigate to="/dashboard" state={{ openAI: true }} replace /></ProtectedRoute>} />
+        <Route path="reports" element={<ProtectedRoute><Navigate to="/dashboard" state={{ openAI: true }} replace /></ProtectedRoute>} />
         <Route path="knowledge/view/:documentId" element={<Suspense fallback={<Spin />}><KnowledgeViewerPage /></Suspense>} />
         <Route path="knowledge" element={<ProtectedRoute requiredRoles={['ADMIN', 'HR']}><Suspense fallback={<Spin />}><KnowledgePage /></Suspense></ProtectedRoute>} />
         <Route path="ai-access" element={<ProtectedRoute requiredRoles={['ADMIN']}><Suspense fallback={<Spin />}><AIDataAccessPage /></Suspense></ProtectedRoute>} />

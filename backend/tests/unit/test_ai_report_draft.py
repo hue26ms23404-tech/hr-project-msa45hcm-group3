@@ -101,8 +101,9 @@ def test_report_fields_and_month_parser_are_closed():
         AIDraftService._validate_command_and_params("DRAFT_REPORT", {"employee_ids": "all"})
     with pytest.raises(HTTPException):
         AIDraftService._validate_command_and_params("DRAFT_REPORT", {"department_id": True})
+    assert AIReportDraftService.validate_access(actor("EMPLOYEE"), {"kind": "ATTENDANCE", "scope": "SELF"})["scope"] == "SELF"
     with pytest.raises(HTTPException):
-        AIReportDraftService.validate_access(actor("EMPLOYEE"), {"kind": "ATTENDANCE", "scope": "SELF"})
+        AIReportDraftService.validate_access(actor("EMPLOYEE"), {"kind": "ATTENDANCE", "scope": "COMPANY"})
     with pytest.raises(HTTPException):
         AIReportDraftService.validate_access(actor("EMPLOYEE"), {"kind": "PAYROLL_SUMMARY"})
 

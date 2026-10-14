@@ -26,7 +26,7 @@ def actor(*roles):
 
 
 @pytest.mark.parametrize("roles,scopes", [
-    (("EMPLOYEE",), []), (("MANAGER",), ["SELF", "DIRECT_REPORTS"]),
+    (("EMPLOYEE",), ["SELF"]), (("MANAGER",), ["SELF", "DIRECT_REPORTS"]),
     (("HR",), ["SELF", "DIRECT_REPORTS", "COMPANY"]),
     (("ADMIN",), ["SELF", "DIRECT_REPORTS", "COMPANY"]),
     (("EMPLOYEE", "HR"), ["SELF", "DIRECT_REPORTS", "COMPANY"]),
@@ -41,7 +41,7 @@ def test_report_catalog_role_matrix(roles, scopes):
         assert any(item["kind"] == "PAYROLL_SUMMARY" for item in catalog) == bool(set(roles) & {"HR", "ADMIN"})
 
 
-@pytest.mark.parametrize("suggestion", ["my_attendance_report", "my_payslip", "team_attendance_report", "team_leave_report", "headcount_report", "company_attendance_report", "payroll_summary"])
+@pytest.mark.parametrize("suggestion", ["team_attendance_report", "team_leave_report", "company_attendance_report", "payroll_summary"])
 def test_employee_report_suggestions_are_denied(suggestion):
     with pytest.raises(HTTPException) as denied:
         resolve_suggestion(suggestion, {"EMPLOYEE"}, 7)
@@ -49,7 +49,7 @@ def test_employee_report_suggestions_are_denied(suggestion):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("message", ["Tạo báo cáo công của tôi tháng này", "Tạo báo cáo phiếu lương của tôi tháng trước", "phân tích báo cáo này", "vẽ biểu đồ nghỉ phép"])
+@pytest.mark.parametrize("message", ["Tạo báo cáo công toàn công ty tháng này", "Tạo báo cáo tổng hợp lương toàn công ty tháng trước"])
 async def test_employee_free_report_prompts_denied_before_db(message):
     db = AsyncMock()
     with pytest.raises(HTTPException) as denied:
@@ -60,7 +60,7 @@ async def test_employee_free_report_prompts_denied_before_db(message):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["ATTENDANCE", "LEAVE", "ATTENDANCE_FIX", "APPROVAL_QUEUE", "HEADCOUNT", "MY_PAYSLIP", "PAYROLL_SUMMARY"])
+@pytest.mark.parametrize("kind", ["APPROVAL_QUEUE", "HEADCOUNT", "PAYROLL_SUMMARY"])
 async def test_employee_all_report_services_denied_before_query(kind):
     db = AsyncMock()
     for call in (
@@ -75,36 +75,40 @@ async def test_employee_all_report_services_denied_before_query(kind):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("method,path", [
-    ("GET", "/reports/catalog"), ("GET", "/reports/runs"),
-    ("POST", "/reports/runs"), ("GET", "/reports/runs/" + "a" * 32),
-    ("GET", "/reports/runs/" + "a" * 32 + "/download"),
-    ("GET", "/reports/runs/" + "a" * 32 + "/file"),
-    ("GET", "/reports/runs/" + "a" * 32 + "/analysis"),
-    ("GET", "/reports?kind=ATTENDANCE&start_date=2026-10-01&end_date=2026-10-31&output=json"),
-    ("GET", "/reports?kind=ATTENDANCE&start_date=2026-10-01&end_date=2026-10-31&output=csv"),
-    ("GET", "/reports?kind=ATTENDANCE&start_date=2026-10-01&end_date=2026-10-31&output=xlsx"),
-])
-async def test_employee_direct_report_endpoints_denied(method, path):
+async def test_employee_can_only_discover_self_reports():
     app = FastAPI()
     app.include_router(reports.router, prefix="/reports")
     db = AsyncMock()
     app.dependency_overrides[get_current_user] = lambda: actor("EMPLOYEE")
     app.dependency_overrides[get_db] = lambda: db
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.request(method, path, json={"kind": "ATTENDANCE", "start_date": "2026-10-01", "end_date": "2026-10-31"})
-    assert response.status_code == 403
+        response = await client.get("/reports/catalog")
+    assert response.status_code == 200
+    entries = response.json()["reports"]
+    assert set(row["kind"] for row in entries) == {"ATTENDANCE", "LEAVE", "ATTENDANCE_FIX", "MY_PAYSLIP"}
+    assert all(row["scopes"] == ["SELF"] for row in entries)
     db.execute.assert_not_called()
-    db.scalar.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_employee_cannot_read_preexisting_own_snapshot():
+async def test_employee_cannot_access_another_account_report_snapshot():
     db = AsyncMock()
+    db.scalar.return_value = None
     with pytest.raises(HTTPException) as denied:
         await authorized_run(db, actor("EMPLOYEE"), "a" * 32)
-    assert denied.value.status_code == 403
-    db.scalar.assert_not_called()
+    assert denied.value.status_code == 404
+    db.scalar.assert_awaited_once()
+
+
+def test_employee_self_report_suggestions_but_no_company_access():
+    from app.services.ai_access import report_scope
+    for name in ["my_attendance_report", "my_payslip"]:
+        resolve_suggestion(name, {"EMPLOYEE"}, 7)
+    assert report_scope(actor("EMPLOYEE"), "SELF") == "SELF"
+    with pytest.raises(HTTPException):
+        report_scope(actor("EMPLOYEE"), "DIRECT_REPORTS")
+    with pytest.raises(HTTPException):
+        report_scope(actor("EMPLOYEE"), "COMPANY")
 
 
 def test_audit_schema_accepts_every_service_action():

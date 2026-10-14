@@ -46,7 +46,7 @@ def report_catalog(user):
             scopes = ["COMPANY"] if privileged else []
         elif kind == "APPROVAL_QUEUE":
             scopes = ["DIRECT_REPORTS"] if "report.read_direct_reports" in actor_caps and employee else []
-        elif kind == "HEADCOUNT" and not reviewer:
+        elif kind == "HEADCOUNT" and not roles & {"MANAGER", "HR", "ADMIN"}:
             scopes = []
         if not scopes:
             continue

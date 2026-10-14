@@ -3,7 +3,7 @@
 Cấu hình này **chỉ áp dụng cho AI Chatbox**, không thay thế hệ thống phân quyền HR. Các truy vấn nhân sự được thực thi bởi backend đã xác thực, AI không nhận quyền truy cập SQL tự do.
 
 ## Nguyên tắc
-- SELF: người dùng chỉ đọc dữ liệu của chính mình theo employee_id từ session. Luôn được phép với role đã xác thực.
+- SELF: người dùng đọc dữ liệu của chính mình, soạn đơn và tạo báo cáo cá nhân theo employee_id từ session. Luôn được phép với role đã xác thực. Báo cáo HEADCOUNT, APPROVAL_QUEUE và PAYROLL_SUMMARY vẫn chặn EMPLOYEE.
 - DIRECT_REPORTS: chỉ nhân viên thuộc cấp quản lý trực tiếp được xác định bởi ReportService/employee_scope.
 - COMPANY: chỉ role HR hoặc ADMIN mới có mức quyền tối đa này; role MANAGER hoặc EMPLOYEE không thể được nâng quyền ở menu AI.
 - Admin được bật/tắt phạm vi trong **Quyền truy cập AI**. Role ADMIN luôn giữ cấu hình gốc. Các giới hạn bổ sung được áp dụng trước truy vấn/snapshot cho các chức năng AI.
