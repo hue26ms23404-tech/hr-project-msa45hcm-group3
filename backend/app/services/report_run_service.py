@@ -50,6 +50,11 @@ class ReportRunService:
         # reusable after an uncertain HTTP failure or chat transaction rollback.
         run_id = (uuid5(NAMESPACE_URL, f"hr-ai-report-draft:{source_draft_id}").hex
                   if source_draft_id is not None else uuid4().hex)
+        # Resolve the requested scope before replay checks. A draft may have
+        # been changed after its original report was committed.
+        roles = user_roles(user)
+        require_reviewer_role(roles)
+        scope = req.scope or ("COMPANY" if req.kind == "PAYROLL_SUMMARY" or req.kind == "HEADCOUNT" and roles & {"HR", "ADMIN"} else "DIRECT_REPORTS" if req.kind in {"HEADCOUNT", "APPROVAL_QUEUE"} else "SELF")
         if source_draft_id is not None:
             async with AsyncSessionLocal() as state_db:
                 existing = await state_db.scalar(select(ReportRun).where(
@@ -65,7 +70,7 @@ class ReportRunService:
                             "end_date": req.end_date.isoformat(),
                             "department_id": req.department_id,
                         }
-                        if existing.kind != req.kind or filters != expected:
+                        if existing.kind != req.kind or filters != expected or existing.scope != scope:
                             raise HTTPException(409, "REPORT_ALREADY_EXISTS")
                         from app.services.report_access import authorized_run
                         verified = await authorized_run(db, user, run_id)
@@ -73,9 +78,6 @@ class ReportRunService:
                     # Do not create another report while the first is still
                     # generating or after an uncertain/failed attempt.
                     raise HTTPException(409, "REPORT_ALREADY_EXISTS")
-        roles = user_roles(user)
-        require_reviewer_role(roles)
-        scope = req.scope or ("COMPANY" if req.kind == "PAYROLL_SUMMARY" or req.kind == "HEADCOUNT" and roles & {"HR", "ADMIN"} else "DIRECT_REPORTS" if req.kind in {"HEADCOUNT", "APPROVAL_QUEUE"} else "SELF")
         employee_ids = []
         started = False
         workbook_key = snapshot_key = None
