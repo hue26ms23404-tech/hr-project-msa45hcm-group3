@@ -75,7 +75,7 @@ async def test_report_collects_period_then_authorized_scope_before_real_run(monk
 @pytest.mark.asyncio
 async def test_unresolved_report_followup_preserves_revision(monkeypatch):
     from app.services import ai_report_draft_service as module
-    draft = SimpleNamespace(draft_id="00000000-0000-4000-8000-000000000000", revision=2,
+    draft = SimpleNamespace(draft_id="00000000-0000-4000-8000-000000000000", revision=2, status="COLLECTING",
                             typed_params={"kind": "ATTENDANCE"}, missing_fields=["start_date", "end_date", "scope"])
     monkeypatch.setattr(module, "interpret_report_prompt", AsyncMock(return_value={}))
     update = AsyncMock()

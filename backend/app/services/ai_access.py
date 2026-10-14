@@ -27,15 +27,13 @@ def report_scope(user, requested_scope: str | None = None) -> str:
     require_reviewer_role(roles)
 
     actor_caps = capabilities(roles)
+    allowed = {"SELF"}
+    if "report.read_direct_reports" in actor_caps:
+        allowed.add("DIRECT_REPORTS")
     if "report.read_company" in actor_caps:
-        allowed = {"SELF", "DIRECT_REPORTS", "COMPANY"}
-        default = "COMPANY"
-    elif "report.read_direct_reports" in actor_caps:
-        allowed = {"SELF", "DIRECT_REPORTS"}
-        default = "DIRECT_REPORTS"
-    else:
-        allowed = {"SELF"}
-        default = "SELF"
+        allowed.add("COMPANY")
+    default = ("COMPANY" if "COMPANY" in allowed else
+               "DIRECT_REPORTS" if "DIRECT_REPORTS" in allowed else "SELF")
 
     selected = requested_scope or default
     if selected not in allowed:

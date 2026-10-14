@@ -126,6 +126,10 @@ def api_context(monkeypatch):
     monkeypatch.setattr(ai_request_security, "consume_budget", AsyncMock())
     monkeypatch.setattr(ai_request_security, "record_event", AsyncMock())
     app = FastAPI()
+    # Endpoint tests mock business SQL directly. Policy loading has its own
+    # dedicated tests; do not reuse their suggestion rows as policy rows.
+    from app.services.ai_role_scopes import scoped_ai_access
+    app.dependency_overrides[scoped_ai_access] = lambda: None
     app.include_router(ai.router, prefix="/ai")
     app.include_router(knowledge.router, prefix="/ai/knowledge")
     app.include_router(reports.router, prefix="/reports")

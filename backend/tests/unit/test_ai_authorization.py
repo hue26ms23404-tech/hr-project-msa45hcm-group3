@@ -43,3 +43,35 @@ def test_forged_client_role_does_not_change_server_role():
     user = actor("EMPLOYEE")
     assert assigned_roles(user) == {"EMPLOYEE"}
     assert "report.read_company" not in capabilities(assigned_roles(user))
+
+
+def test_ai_scope_restrictions_cannot_increase_hr_permissions():
+    from app.core.authorization import ai_scope_context
+    actor_roles = {"MANAGER"}
+    limits = {
+        "EMPLOYEE": {"SELF"},
+        "MANAGER": {"SELF"},
+        "HR": {"SELF", "COMPANY"},
+        "ADMIN": {"SELF", "DIRECT_REPORTS", "COMPANY"},
+    }
+    with ai_scope_context(limits):
+        assert "report.read_direct_reports" not in capabilities(actor_roles)
+        assert "report.read_company" not in capabilities(actor_roles)
+        with pytest.raises(HTTPException):
+            report_scope(actor("MANAGER"), "DIRECT_REPORTS")
+        assert report_scope(actor("MANAGER"), "SELF") == "SELF"
+        with pytest.raises(HTTPException):
+            report_scope(actor("HR"), "DIRECT_REPORTS")
+        assert report_scope(actor("HR"), "COMPANY") == "COMPANY"
+        assert report_scope(actor("ADMIN"), "COMPANY") == "COMPANY"
+    assert "report.read_direct_reports" in capabilities(actor_roles)
+
+
+def test_admin_role_policy_never_grants_company_to_employee():
+    from app.core.authorization import ai_scope_context
+    # Even a malformed database row cannot grant capabilities above role maxima.
+    with ai_scope_context({"EMPLOYEE": {"SELF", "DIRECT_REPORTS", "COMPANY"}}):
+        assert "report.read_company" not in capabilities({"EMPLOYEE"})
+        assert "report.read_direct_reports" not in capabilities({"EMPLOYEE"})
+        with pytest.raises(HTTPException):
+            report_scope(actor("EMPLOYEE"), "COMPANY")
