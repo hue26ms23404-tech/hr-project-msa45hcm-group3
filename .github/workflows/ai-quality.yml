@@ -46,3 +46,70 @@ jobs:
         run: npm test
       - name: Typecheck and build
         run: npm run build
+
+  postgres-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hr_user
+          POSTGRES_PASSWORD: hr_secret_password
+          POSTGRES_DB: hr_management_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hr_user -d hr_management_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      POSTGRES_SERVER: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: hr_user
+      POSTGRES_PASSWORD: hr_secret_password
+      POSTGRES_DB: hr_management_db
+      SYNC_DATABASE_URL: postgresql+psycopg2://hr_user:hr_secret_password@localhost:5432/hr_management_db
+      DATABASE_URL: postgresql+asyncpg://hr_user:hr_secret_password@localhost:5432/hr_management_db
+      GEMINI_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Run all migrations on a fresh PostgreSQL database
+        run: |
+          alembic upgrade head
+          alembic current
+      - name: Check persisted AI role policy restrictions
+        run: |
+          python - <<'PY'
+          import asyncio
+          from sqlalchemy import select
+          from app.core.database import AsyncSessionLocal
+          from app.models.ai_role_scope import AIRoleScopePolicy
+          from app.services.ai_role_scopes import load_ai_scopes
+
+          async def check():
+              async with AsyncSessionLocal() as db:
+                  db.add(AIRoleScopePolicy(
+                      role_code="MANAGER",
+                      allow_direct_reports=False,
+                      allow_company=False,
+                  ))
+                  await db.commit()
+                  scopes = await load_ai_scopes(db)
+                  assert scopes["MANAGER"] == {"SELF"}
+                  assert scopes["ADMIN"] == {"SELF", "DIRECT_REPORTS", "COMPANY"}
+                  row = await db.scalar(select(AIRoleScopePolicy).where(
+                      AIRoleScopePolicy.role_code == "MANAGER"))
+                  assert row is not None and not row.allow_direct_reports
+          asyncio.run(check())
+          PY
