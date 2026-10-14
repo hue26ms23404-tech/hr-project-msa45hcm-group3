@@ -228,3 +228,17 @@ async def test_completed_report_draft_replay_never_creates_second_report(monkeyp
     with pytest.raises(HTTPException):
         await AIReportDraftService.finish_or_ask(AsyncMock(), actor(), draft)
     create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_report_draft_passes_stable_idempotency_key(monkeypatch):
+    from app.services import ai_report_draft_service as module
+    draft = SimpleNamespace(draft_id="a" * 36, status="COLLECTING", revision=1,
+        typed_params={"kind": "HEADCOUNT", "scope": "DIRECT_REPORTS",
+                      "start_date": "2026-10-01", "end_date": "2026-10-14"},
+        missing_fields=[])
+    create = AsyncMock(return_value={"run": SimpleNamespace(run_id="b" * 32)})
+    monkeypatch.setattr(ReportRunService, "create", create)
+    monkeypatch.setattr(AIDraftService, "mark_ready", AsyncMock())
+    await AIReportDraftService.finish_or_ask(AsyncMock(), actor(), draft)
+    assert create.await_args.kwargs["source_draft_id"] == draft.draft_id

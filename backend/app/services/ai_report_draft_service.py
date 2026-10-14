@@ -136,7 +136,7 @@ class AIReportDraftService:
             req = ReportRunCreate.model_validate(draft.typed_params)
         except ValidationError as exc:
             raise HTTPException(422, "INVALID_INPUT") from exc
-        result = await ReportRunService.create(db, user, req)
+        result = await ReportRunService.create(db, user, req, source_draft_id=draft.draft_id)
         await AIDraftService.mark_ready(db, draft.draft_id, user.user_account_id)
         scope_label = {"SELF": "bản thân", "DIRECT_REPORTS": "nhân viên trực tiếp", "COMPANY": "toàn công ty"}[req.scope]
         return AIChatResponse(reply=f"Đã tạo báo cáo từ {req.start_date:%d/%m/%Y} đến {req.end_date:%d/%m/%Y}, phạm vi {scope_label}. Bạn có thể xem trước và tải Excel.", action=AIChatAction(action_type="OPEN_REPORT", data={"path": "/reports", **draft.typed_params, "run_id": result["run"].run_id}))

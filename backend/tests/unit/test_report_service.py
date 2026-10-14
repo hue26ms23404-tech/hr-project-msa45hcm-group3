@@ -276,3 +276,33 @@ def test_workbook_uses_print_layout_native_dates_and_readable_scope():
     assert data["I2"].value == "'=malicious"
     assert "ReportData" in data.tables and data.tables["ReportData"].ref == "A1:I2"
     assert workbook["Thông tin"]["B5"].value == "Nhân viên trực tiếp"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,scope,expected_manager_filter", [
+    ("MANAGER", "DIRECT_REPORTS", True),
+    ("HR", "COMPANY", False),
+])
+async def test_headcount_query_intersects_frozen_ids_before_grouping(role, scope, expected_manager_filter):
+    db = AsyncMock()
+    db.execute.return_value = empty_rows()
+    result = await ReportService.generate(db, user(role), "HEADCOUNT",
+        date(2026, 10, 1), date(2026, 10, 31), None, scope,
+        source_employee_ids=[7, 11])
+    assert result["rows"] == []
+    sql = str(db.execute.await_args.args[0].compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "employee_id IN (7, 11)" in sql
+    assert ("manager_employee_id" in sql) is expected_manager_filter
+    assert "GROUP BY" in sql
+
+
+@pytest.mark.asyncio
+async def test_empty_frozen_headcount_cannot_count_all_employees():
+    db = AsyncMock()
+    db.execute.return_value = empty_rows()
+    await ReportService.generate(db, user("HR"), "HEADCOUNT",
+        date(2026, 10, 1), date(2026, 10, 31), None, "COMPANY", source_employee_ids=[])
+    sql = str(db.execute.await_args.args[0].compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "employee_id IN " in sql and "GROUP BY" in sql

@@ -20,6 +20,7 @@ from app.services.report_run_service import ReportRunService
 from app.services.ai_request_security import secured_operation
 from app.services.report_catalog import report_catalog
 from app.services.report_access import authorized_run
+from app.services.ai_role_scopes import scoped_ai_access
 from app.services.ai_access import require_reviewer_role, user_roles
 
 async def require_report_user(user: UserAccount = Depends(get_current_user)):
@@ -31,7 +32,8 @@ router = APIRouter(dependencies=[Depends(require_report_user)])
 
 @router.get("/runs/{run_id}/analysis")
 async def analyze_report_run(run_id: str, db: AsyncSession = Depends(get_db),
-                             user: UserAccount = Depends(get_current_user)):
+                             user: UserAccount = Depends(get_current_user),
+                             _policy: None = Depends(scoped_ai_access)):
     from app.services.ai_analysis_tool import AIAnalysisTool
     result = await AIAnalysisTool.execute(db, user, run_id)
     return JSONResponse(result, headers={"Cache-Control": "private, no-store"})

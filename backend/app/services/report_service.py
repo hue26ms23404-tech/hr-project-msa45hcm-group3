@@ -487,6 +487,11 @@ class ReportService:
             rows = sorted(leave_rows + fix_rows, key=lambda row: (row["request_date"], row["created_at"], row["request_type"]))
             stmt = None
         elif kind == "HEADCOUNT":
+            # Aggregated rows have no employee_id to audit after the query.
+            # Intersect with the pre-authorized snapshot BEFORE grouping.
+            if source_employee_ids is not None:
+                frozen_filter = Employee.employee_id.in_(source_employee_ids)
+                scope_filter = and_(scope_filter, frozen_filter) if scope_filter is not None else frozen_filter
             stmt = select(
                 Employee.department_id, Department.department_name, Employee.employment_status,
                 func.count(Employee.employee_id).label("employee_count"),
