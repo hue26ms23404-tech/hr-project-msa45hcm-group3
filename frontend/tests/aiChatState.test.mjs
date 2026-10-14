@@ -9,14 +9,23 @@ test('server suggestions are accepted without local role filtering', () => {
   assert.equal(acceptsServerSuggestions([{ suggestion_id: 'knowledge_admin' }]), false);
 });
 
-test('provider timeout during follow-up preserves draft and allows retry', () => {
-  assert.deepEqual(chatFailureState(503, 'AI_UNAVAILABLE'), { clearDraft: false, restartRequired: false, retryable: true });
-  assert.deepEqual(chatFailureState(undefined), { clearDraft: false, restartRequired: false, retryable: true });
+test('network timeouts and provider errors never offer a blind chat POST retry', () => {
+  assert.deepEqual(chatFailureState(503, 'AI_UNAVAILABLE'),
+    { clearDraft: false, restartRequired: false, retryable: false, uncertainOutcome: true });
+  assert.deepEqual(chatFailureState(undefined),
+    { clearDraft: false, restartRequired: false, retryable: false, uncertainOutcome: true });
+  assert.deepEqual(chatFailureState(504, 'DATA_SERVICE_UNAVAILABLE'),
+    { clearDraft: false, restartRequired: false, retryable: false, uncertainOutcome: true });
+});
+
+test('only a pre-execution rate limit can offer the same-request retry', () => {
+  assert.deepEqual(chatFailureState(429, 'RATE_LIMITED'),
+    { clearDraft: false, restartRequired: false, retryable: true, uncertainOutcome: false });
 });
 
 test('expiry and authorization have different recovery', () => {
-  assert.deepEqual(chatFailureState(410, 'AI_DRAFT_EXPIRED'), { clearDraft: true, restartRequired: false, retryable: false });
-  assert.deepEqual(chatFailureState(403, 'PERMISSION_DENIED'), { clearDraft: false, restartRequired: false, retryable: false });
+  assert.deepEqual(chatFailureState(410, 'AI_DRAFT_EXPIRED'), { clearDraft: true, restartRequired: false, retryable: false, uncertainOutcome: false });
+  assert.deepEqual(chatFailureState(403, 'PERMISSION_DENIED'), { clearDraft: false, restartRequired: false, retryable: false, uncertainOutcome: false });
 });
 
 test('validated date is readable and actor switch is detected', () => {
@@ -29,9 +38,9 @@ test('validated date is readable and actor switch is detected', () => {
 
 test('revision conflict is recoverable and must not erase draft state', () => {
   assert.deepEqual(chatFailureState(409, 'AI_DRAFT_REVISION_CONFLICT'),
-    { clearDraft: false, restartRequired: true, retryable: false });
+    { clearDraft: false, restartRequired: true, retryable: false, uncertainOutcome: false });
   assert.deepEqual(chatFailureState(409, 'AI_DRAFT_NOT_COLLECTING'),
-    { clearDraft: true, restartRequired: false, retryable: false });
+    { clearDraft: true, restartRequired: false, retryable: false, uncertainOutcome: false });
 });
 
 test('a conflict blocks new sends until the user explicitly restarts', () => {

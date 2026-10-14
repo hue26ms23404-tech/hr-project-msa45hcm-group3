@@ -18,7 +18,10 @@ export function chatFailureState(status?: number, code?: string) {
       || status === 409 && code === 'AI_DRAFT_NOT_COLLECTING'
       || status === 410 && code === 'AI_DRAFT_EXPIRED',
     restartRequired: status === 409 && code === 'AI_DRAFT_REVISION_CONFLICT',
-    retryable: status === undefined || status === 429 || status >= 500,
+    // /ai/chat can persist a draft or report before an HTTP response reaches
+    // the browser. Missing responses and 5xx never authorize replaying this POST.
+    retryable: status === 429,
+    uncertainOutcome: status === undefined || status >= 500,
   };
 }
 

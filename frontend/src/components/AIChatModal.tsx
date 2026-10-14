@@ -139,9 +139,8 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       setActiveDraftRevision(res.data.draft_revision || null);
       setMissingFields(res.data.missing_fields || []);
       setInputOptions(res.data.input_options || []);
-      if (res.data.message_code === 'AI_UNAVAILABLE') {
-        setRetryMessage({ text, startNew, suggestionId, inputs });
-      }
+      // Do not replay a mutating chat POST without server-side idempotency.
+      // Even a fallback response is not a general retry guarantee.
 
       const aiMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -168,6 +167,8 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       if (failure.retryable) setRetryMessage({ text, startNew, suggestionId, inputs });
       const errorMessage = failure.restartRequired
         ? 'Bản nháp đã được cập nhật ở lượt khác. Hãy chọn “Bắt đầu yêu cầu mới” bên dưới. Bản nháp trên máy chủ không bị xóa.'
+        : failure.uncertainOutcome
+          ? 'Chưa nhận được xác nhận từ máy chủ. Yêu cầu có thể đã tạo bản nháp hoặc báo cáo. Hãy kiểm tra các bản nháp hoặc báo cáo hiện có trước khi gửi yêu cầu mới để tránh tạo trùng.'
         : typeof err?.response?.data?.message === 'string' ? err.response.data.message : status === 422
         ? 'Thông tin chưa hợp lệ. Vui lòng kiểm tra các trường được yêu cầu.'
         : status === 403 || code === 'AI_DRAFT_NOT_FOUND'

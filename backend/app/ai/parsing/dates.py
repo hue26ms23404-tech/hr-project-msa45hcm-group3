@@ -90,7 +90,7 @@ def resolve_rule_date(message: str, today: date) -> DateResolution | None:
         return _result(last - timedelta(days=(last.weekday() - WEEKDAYS[last_weekday[1]]) % 7))
     explicit = re.search(r"\b(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})\b", text)
     day_first = re.search(r"\b(\d{1,2})(?:\s*[/.-]\s*|\s+)(\d{1,2})(?:(?:\s*[/.-]\s*|\s+)(\d{4}))?\b", text)
-    named = re.search(r"\b(?:ngay|mung)\s+(\d{1,2})\s+thang\s+(\d{1,2})(?:\s+(?:nam\s+)?(\d{4}))?\b", text)
+    named = re.search(r"\b(?:(?:ngay|mung)\s+)?(\d{1,2})\s+thang\s+(\d{1,2})(?:\s+(?:nam\s+)?(\d{4}))?\b", text)
     relative_month = re.search(r"\b(?:ngay|mung)\s+(\d{1,2})\s+thang\s+(sau|toi|nay|truoc)\b", text)
     try:
         if explicit:
