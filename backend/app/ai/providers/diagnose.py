@@ -6,13 +6,14 @@ import json
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.ai.providers.gemini import classify_error, generate_json, readiness, ProviderFailure
 from app.core.config import settings
 
 
 class ProbeAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     ok: bool
 
 

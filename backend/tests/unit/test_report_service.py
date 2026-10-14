@@ -133,18 +133,23 @@ def test_orphan_scan_ignores_referenced_recent_and_nonserver_files(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_report_run_read_rechecks_owner_and_current_employee_scope(monkeypatch):
+@pytest.mark.parametrize("employee_id", [None, 7])
+async def test_report_run_read_rechecks_owner_and_current_employee_scope(monkeypatch, employee_id):
     run = SimpleNamespace(
         run_id="12345678123456781234567812345678", owner_user_account_id=9,
         status="READY", expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
         kind="ATTENDANCE", scope="SELF", filters={"start_date": "2026-10-01", "end_date": "2026-10-31"}, scope_snapshot=[7],
     )
+    if employee_id is not None:
+        run.filters["employee_id"] = employee_id
     db = AsyncMock()
     db.scalar.return_value = run
-    monkeypatch.setattr(ReportService, "visible_employee_ids", AsyncMock(return_value=("SELF", [7])))
+    visible = AsyncMock(return_value=("SELF", [7]))
+    monkeypatch.setattr(ReportService, "visible_employee_ids", visible)
     owner = user("MANAGER")
     owner.user_account_id = 9
     assert await _authorized_run(db, owner, run.run_id) is run
+    assert visible.call_args.kwargs == ({"employee_id": employee_id} if employee_id else {})
     sql = str(db.scalar.call_args.args[0].compile(dialect=postgresql.dialect()))
     assert "owner_user_account_id" in sql
 

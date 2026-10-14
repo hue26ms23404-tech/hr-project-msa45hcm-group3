@@ -55,7 +55,8 @@ def report_catalog(user):
             "kind": kind, "label": label, "template_version": f"{kind.lower()}_v1",
             "columns": list(template_columns(kind)), "scopes": scopes,
             "default_scope": "COMPANY" if kind in {"HEADCOUNT", "PAYROLL_SUMMARY"} and privileged else "DIRECT_REPORTS" if kind in {"HEADCOUNT", "APPROVAL_QUEUE"} and "DIRECT_REPORTS" in scopes else "SELF" if "SELF" in scopes else scopes[0],
-            "filters": ["start_date", "end_date"] + ([] if kind == "MY_PAYSLIP" else ["department_id"]),
+            "filters": ["start_date", "end_date"] + ([] if kind == "MY_PAYSLIP" else ["department_id"])
+                       + (["employee_id"] if kind in {"ATTENDANCE", "LEAVE", "ATTENDANCE_FIX"} else []),
             "period_rule": "CALENDAR_MONTH" if payroll else "SAME_YEAR",
             "released_statuses": ["APPROVED", "CLOSED"] if payroll else [],
             "max_rows": 10000,

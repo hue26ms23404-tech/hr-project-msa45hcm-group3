@@ -30,9 +30,11 @@ async def authorized_run(db, user, run_id):
         await db.commit()
         raise HTTPException(410, "REPORT_EXPIRED")
     try:
+        target_filter = {"employee_id": run.filters["employee_id"]} if run.filters.get("employee_id") is not None else {}
         _, current_ids = await ReportService.visible_employee_ids(
             db, user, run.kind, run.scope, run.filters.get("department_id"),
             date.fromisoformat(run.filters["start_date"]), date.fromisoformat(run.filters["end_date"]),
+            **target_filter,
         )
     except HTTPException as exc:
         raise HTTPException(404, "REPORT_UNAVAILABLE") from exc

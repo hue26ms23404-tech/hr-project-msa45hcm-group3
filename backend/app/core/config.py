@@ -41,10 +41,13 @@ class Settings(BaseSettings):
 
     # Gemini is opt-in; configuring a key alone never enables paid/quota calls.
     GEMINI_ENABLED: bool = False
+    GEMINI_SEMANTIC_ENABLED: bool = True
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL_NAME: str = "gemini-3.6-flash"
     GEMINI_INTENT_TIMEOUT_SECONDS: float = Field(default=15, ge=5, le=30)
     GEMINI_POLICY_TIMEOUT_SECONDS: float = Field(default=15, ge=5, le=30)
+    GEMINI_PUBLIC_SEARCH_ENABLED: bool = True
+    GEMINI_PUBLIC_SEARCH_TIMEOUT_SECONDS: float = Field(default=30, ge=5, le=45)
     AI_KNOWLEDGE_STORAGE_DIR: Path = Path(__file__).resolve().parents[2] / "storage" / "private" / "ai-knowledge"
     AI_KNOWLEDGE_MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024
     REPORT_STORAGE_DIR: Path = Path(__file__).resolve().parents[2] / "storage" / "private" / "reports"

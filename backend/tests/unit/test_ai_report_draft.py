@@ -15,6 +15,76 @@ def actor(role="MANAGER"):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("message,expected_kind,expected_scope,expected_employee", [
+    ("đổi sang toàn công ty", "ATTENDANCE", "COMPANY", None),
+    ("đổi sang bản thân", "ATTENDANCE", "SELF", None),
+    ("đổi sang nhóm", "ATTENDANCE", "DIRECT_REPORTS", None),
+    ("đổi sang headcount", "HEADCOUNT", "COMPANY", None),
+    ("đổi sang báo cáo nghỉ phép", "LEAVE", "COMPANY", 23),
+    ("đổi sang tháng trước", "ATTENDANCE", "COMPANY", 23),
+])
+async def test_revise_employee_report_resets_only_filters_replaced_by_request(monkeypatch, message, expected_kind, expected_scope, expected_employee):
+    from datetime import datetime, timedelta, timezone
+    from app.services import ai_report_draft_service as module
+    from app.schemas.reports import ReportRunCreate
+
+    db = AsyncMock()
+    db.scalar.return_value = SimpleNamespace(kind="ATTENDANCE", scope="COMPANY", status="READY",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        filters={"start_date": "2026-10-01", "end_date": "2026-10-08", "employee_id": 23})
+    start = AsyncMock()
+    monkeypatch.setattr(AIReportDraftService, "start", start)
+    monkeypatch.setattr(module, "interpret_report_prompt", AsyncMock(return_value={}))
+    await AIReportDraftService.revise_run(db, actor("HR"), "a" * 32, message, date(2026, 10, 8))
+    params = start.await_args.args[4]
+    assert params["kind"] == expected_kind and params["scope"] == expected_scope
+    assert params.get("employee_id") == expected_employee
+    ReportRunCreate.model_validate(params)
+
+
+@pytest.mark.asyncio
+async def test_revising_employee_report_cannot_expand_manager_scope(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.services import ai_report_draft_service as module
+    db = AsyncMock()
+    db.scalar.return_value = SimpleNamespace(kind="ATTENDANCE", scope="DIRECT_REPORTS", status="READY",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        filters={"start_date": "2026-10-01", "end_date": "2026-10-08", "employee_id": 23})
+    start = AsyncMock()
+    monkeypatch.setattr(AIReportDraftService, "start", start)
+    monkeypatch.setattr(module, "interpret_report_prompt", AsyncMock(return_value={}))
+    with pytest.raises(HTTPException) as denied:
+        await AIReportDraftService.revise_run(db, actor(), "a" * 32, "đổi sang toàn công ty", date(2026, 10, 8))
+    assert denied.value.status_code == 403
+    start.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inputs,message", [({"scope": "COMPANY"}, ""), (None, "đổi sang toàn công ty"), (None, "đổi sang headcount")])
+async def test_collecting_employee_report_applies_same_filter_reset(monkeypatch, inputs, message):
+    from app.services import ai_report_draft_service as module
+    draft = SimpleNamespace(draft_id="a" * 36, revision=2, status="COLLECTING", missing_fields=["start_date", "end_date"],
+        typed_params={"kind": "ATTENDANCE", "scope": "COMPANY", "employee_id": 23})
+    monkeypatch.setattr(module, "interpret_report_prompt", AsyncMock(return_value={}))
+    update = AsyncMock(return_value=draft)
+    monkeypatch.setattr(AIDraftService, "update_draft", update)
+    monkeypatch.setattr(AIReportDraftService, "finish_or_ask", AsyncMock())
+    await AIReportDraftService.continue_draft(AsyncMock(), actor("HR"), draft, message, date(2026, 10, 8), inputs)
+    assert "employee_id" not in update.await_args.args[3]
+
+
+def test_explicit_employee_filter_is_validated_instead_of_silently_erased():
+    from app.schemas.reports import ReportRunCreate
+    from app.services.ai_report_draft_service import revised_report_params
+    from pydantic import ValidationError
+    current = {"kind": "ATTENDANCE", "scope": "COMPANY", "employee_id": 23,
+               "start_date": "2026-10-01", "end_date": "2026-10-08"}
+    assert revised_report_params(current, {"scope": "DIRECT_REPORTS", "employee_id": 24})["employee_id"] == 24
+    with pytest.raises(ValidationError):
+        ReportRunCreate.model_validate(revised_report_params(current, {"kind": "HEADCOUNT", "employee_id": 24}))
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind, role, message, scope", [
     ("MY_PAYSLIP", "MANAGER", "Xem bảng lương của tôi tháng này", "SELF"),
     ("PAYROLL_SUMMARY", "HR", "Xem bảng lương toàn công ty tháng này", "COMPANY"),
@@ -92,6 +162,35 @@ async def test_report_scope_escalation_rejected_before_persistence():
         await AIReportDraftService.start(db, actor("EMPLOYEE"), "Tạo báo cáo công toàn công ty tháng này", date(2026, 10, 7))
     assert denied.value.status_code == 403
     db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_employee_report_preserves_target_through_period_followup(monkeypatch):
+    from app.services import ai_report_draft_service as module
+    db = AsyncMock()
+    db.add = Mock()
+    owner = actor("HR")
+    create = AsyncMock(return_value={"run": SimpleNamespace(run_id="a" * 32)})
+    monkeypatch.setattr(module, "interpret_report_prompt", AsyncMock(return_value={}))
+    monkeypatch.setattr(ReportRunService, "create", create)
+    monkeypatch.setattr(AIDraftService, "mark_ready", AsyncMock())
+    response = await AIReportDraftService.start(db, owner, "Báo cáo chấm công EMP023", date(2026, 10, 14),
+                                               {"kind": "ATTENDANCE", "scope": "COMPANY", "employee_id": 23})
+    draft = db.add.call_args.args[0]
+    assert response.missing_fields == ["start_date", "end_date"]
+
+    async def update(_db, _id, _owner, params, missing):
+        draft.typed_params, draft.missing_fields = params, missing
+        draft.revision += 1
+        return draft
+
+    monkeypatch.setattr(AIDraftService, "update_draft", update)
+    response = await AIReportDraftService.continue_draft(db, owner, draft, "tháng trước", date(2026, 10, 14))
+    request = create.call_args.args[2]
+    assert request.employee_id == 23 and request.scope == "COMPANY"
+    assert request.start_date == date(2026, 9, 1) and request.end_date == date(2026, 9, 30)
+    assert response.action.data["employee_id"] == 23
+    assert "toàn công ty" not in response.reply
 
 
 def test_report_fields_and_month_parser_are_closed():
