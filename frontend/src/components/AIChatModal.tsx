@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Modal, Input, Button, Dropdown, Card, Spin, Space, Typography, message } from 'antd';
 import { SendOutlined, RobotOutlined, UserOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import api from '../api/client';
-import { acceptsServerSuggestions, actorChanged, chatFailureState, readableISODate } from '../api/aiChatState';
+import { acceptsServerSuggestions, actorChanged, canSubmitChat, chatFailureState, readableISODate } from '../api/aiChatState';
 import { ChatReportPreview } from './ChatReportPreview';
 import { Link, useNavigate } from 'react-router-dom';
 import type { AIChatAction, AIChatResponse, AISource, AISuggestion, AIInputOption, AIDraftInputs, AIChatRequest } from '../types/ai';
@@ -40,6 +40,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
   const [inputVal, setInputVal] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  const [draftRestartRequired, setDraftRestartRequired] = useState(false);
   const [activeDraftRevision, setActiveDraftRevision] = useState<number | null>(null);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [inputOptions, setInputOptions] = useState<AIInputOption[]>([]);
@@ -68,6 +69,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       setMessages([]);
       setActiveDraftId(null);
       setActiveDraftRevision(null);
+      setDraftRestartRequired(false);
       setMissingFields([]);
       setInputOptions([]);
       setLastReportRunId(null);
@@ -96,7 +98,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
 
   const handleSendMessage = async (textToSend?: string, startNew = false, suggestionId?: string, inputs?: AIDraftInputs) => {
     const text = textToSend || inputVal.trim();
-    if (!text || loading) return;
+    if (!text || loading || !canSubmitChat(draftRestartRequired)) return;
     setRetryMessage(null);
 
     const userMsg: ChatMessage = {
@@ -132,6 +134,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
         setLastReportRunId(res.data.action.data.run_id);
         setPreviewRunId(res.data.action.data.run_id); setEditingRunId(null);
       } else if (res.data.draft_id || startNew) setEditingRunId(null);
+      setDraftRestartRequired(false);
       setActiveDraftId(res.data.draft_id || null);
       setActiveDraftRevision(res.data.draft_revision || null);
       setMissingFields(res.data.missing_fields || []);
@@ -155,9 +158,17 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       const status = err?.response?.status;
       const code = err?.response?.data?.detail;
       const failure = chatFailureState(status, code);
-      if (failure.clearDraft) { setActiveDraftId(null); setActiveDraftRevision(null); setMissingFields([]); }
+      if (failure.clearDraft) {
+        setActiveDraftId(null); setActiveDraftRevision(null); setMissingFields([]);
+        setInputOptions([]); setDraftRestartRequired(false);
+      }
+      // A stale revision is recoverable only with fresh server state or an explicit restart.
+      // There is no read-draft endpoint, so block stale requests until the user restarts.
+      if (failure.restartRequired) { setDraftRestartRequired(true); setRetryMessage(null); }
       if (failure.retryable) setRetryMessage({ text, startNew, suggestionId, inputs });
-      const errorMessage = typeof err?.response?.data?.message === 'string' ? err.response.data.message : status === 422
+      const errorMessage = failure.restartRequired
+        ? 'Bản nháp đã được cập nhật ở lượt khác. Hãy chọn “Bắt đầu yêu cầu mới” bên dưới. Bản nháp trên máy chủ không bị xóa.'
+        : typeof err?.response?.data?.message === 'string' ? err.response.data.message : status === 422
         ? 'Thông tin chưa hợp lệ. Vui lòng kiểm tra các trường được yêu cầu.'
         : status === 403 || code === 'AI_DRAFT_NOT_FOUND'
         ? 'Bạn không có quyền thực hiện yêu cầu này hoặc truy cập dữ liệu được yêu cầu. Vui lòng chọn chức năng trong phạm vi quyền của bạn.'
@@ -190,6 +201,22 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const startFreshConversation = () => {
+    if (loading) return;
+    // Explicit local reset; do not mutate or cancel the newer server-side draft.
+    setActiveDraftId(null);
+    setActiveDraftRevision(null);
+    setMissingFields([]);
+    setInputOptions([]);
+    setDraftRestartRequired(false);
+    setRetryMessage(null);
+    setMessages([]);
+    setInputVal('');
+    setPreviewRunId(null);
+    setEditingRunId(null);
+    setLastReportRunId(null);
   };
 
   const handleActionClick = (action: AIChatAction) => {
@@ -399,6 +426,10 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
         <div ref={messagesEndRef} />
       </div>
 
+      {draftRestartRequired && <Space wrap style={{ margin: '10px 0 8px', flexShrink: 0 }}>
+        <Typography.Text type="warning">Nháp hiện tại đã thay đổi ở nơi khác. Không thể tiếp tục bằng revision cũ.</Typography.Text>
+        <Button type="primary" size="small" disabled={loading} onClick={startFreshConversation}>Bắt đầu yêu cầu mới</Button>
+      </Space>}
       {/* Suggestions stay collapsed so the conversation remains the focus. */}
       {!activeDraftId && suggestionsLoading && <Typography.Text type="secondary">Đang tải gợi ý...</Typography.Text>}
       {!activeDraftId && suggestionsError && <Space style={{ margin: '10px 0 8px' }}>
@@ -418,7 +449,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       </div>}
       {retryMessage && <Button size="small" onClick={() => void handleSendMessage(retryMessage.text, retryMessage.startNew, retryMessage.suggestionId, retryMessage.inputs)}>Thử lại yêu cầu</Button>}
 
-      {activeDraftId && <Space wrap style={{ marginBottom: 8, flexShrink: 0 }}>
+      {activeDraftId && !draftRestartRequired && <Space wrap style={{ marginBottom: 8, flexShrink: 0 }}>
         {inputOptions.filter((option) => option.field === missingFields[0]).map((option) => <Button key={`${option.field}-${option.value}`} size="small" disabled={loading} onClick={() => handleSendMessage(option.label, false, undefined, { [option.field]: option.value })}>{option.label}</Button>)}
         {missingFields[0] === 'start_date' && ['Tháng này', 'Tháng trước'].map((label) => <Button key={label} size="small" disabled={loading} onClick={() => handleSendMessage(label)}>{label}</Button>)}
         {missingFields[0] === 'session' && [
@@ -436,6 +467,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
         <Input.TextArea
           rows={2}
           value={inputVal}
+          disabled={draftRestartRequired}
           onChange={(e) => setInputVal(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -452,6 +484,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
           style={{ height: 'auto', borderRadius: 8, padding: '0 20px' }}
           onClick={() => handleSendMessage()}
           loading={loading}
+          disabled={draftRestartRequired}
         >
           Gửi
         </Button>

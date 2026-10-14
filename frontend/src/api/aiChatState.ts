@@ -15,8 +15,9 @@ export function readableISODate(value: string): string {
 export function chatFailureState(status?: number, code?: string) {
   return {
     clearDraft: status === 404 && code === 'AI_DRAFT_NOT_FOUND'
-      || status === 409 && code?.startsWith('AI_DRAFT_') === true
+      || status === 409 && code === 'AI_DRAFT_NOT_COLLECTING'
       || status === 410 && code === 'AI_DRAFT_EXPIRED',
+    restartRequired: status === 409 && code === 'AI_DRAFT_REVISION_CONFLICT',
     retryable: status === undefined || status === 429 || status >= 500,
   };
 }
@@ -24,4 +25,9 @@ export function chatFailureState(status?: number, code?: string) {
 export function acceptsServerSuggestions(value: unknown): value is AISuggestion[] {
   return Array.isArray(value) && value.every((item) => item && typeof item.suggestion_id === 'string'
     && typeof item.prompt === 'string' && typeof item.catalog_version === 'string');
+}
+
+/** A conflicting revision must be explicitly discarded or resynced before a new send. */
+export function canSubmitChat(restartRequired: boolean): boolean {
+  return !restartRequired;
 }
