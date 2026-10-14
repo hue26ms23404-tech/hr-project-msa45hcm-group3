@@ -41,7 +41,7 @@ def test_report_catalog_role_matrix(roles, scopes):
         assert any(item["kind"] == "PAYROLL_SUMMARY" for item in catalog) == bool(set(roles) & {"HR", "ADMIN"})
 
 
-@pytest.mark.parametrize("suggestion", ["team_attendance_report", "team_leave_report", "company_attendance_report", "payroll_summary"])
+@pytest.mark.parametrize("suggestion", ["headcount_report", "team_attendance_report", "team_leave_report", "company_attendance_report", "payroll_summary"])
 def test_employee_report_suggestions_are_denied(suggestion):
     with pytest.raises(HTTPException) as denied:
         resolve_suggestion(suggestion, {"EMPLOYEE"}, 7)
@@ -114,3 +114,38 @@ def test_employee_self_report_suggestions_but_no_company_access():
 def test_audit_schema_accepts_every_service_action():
     constraint = next(item for item in AIRequestEvent.__table__.constraints if item.name == "ck_ai_request_event_action")
     assert set(re.findall(r"'([A-Z_]+)'", str(constraint.sqltext))) == set(ACTIONS)
+
+
+@pytest.mark.parametrize("roles,employee_id,expected", [
+    ({"EMPLOYEE"}, 7, False),
+    ({"MANAGER"}, 7, True),
+    ({"HR"}, 7, True),
+    ({"ADMIN"}, 7, True),
+    ({"HR"}, None, True),
+    ({"MANAGER"}, None, False),
+])
+def test_headcount_suggestion_and_report_catalog_share_eligibility(roles, employee_id, expected):
+    from app.services.ai_suggestions import suggestion_allowed
+    user = actor(*roles)
+    user.employee_id = employee_id
+    available_kinds = {item["kind"] for item in report_catalog(user)["reports"]}
+    assert suggestion_allowed("headcount_report", roles, employee_id) is expected
+    assert ("HEADCOUNT" in available_kinds) is expected
+    if expected:
+        resolve_suggestion("headcount_report", roles, employee_id)
+    else:
+        with pytest.raises(HTTPException) as exc:
+            resolve_suggestion("headcount_report", roles, employee_id)
+        assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_employee_headcount_suggestion_rejected_before_business_queries():
+    db = AsyncMock()
+    with pytest.raises(HTTPException) as exc:
+        await AIService.process_chat(db, 7,
+            AIChatRequest(suggestion_id="headcount_report"),
+            {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
+    assert exc.value.status_code == 403
+    db.execute.assert_not_awaited()
+    db.add.assert_not_called()

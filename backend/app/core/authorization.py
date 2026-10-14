@@ -21,9 +21,9 @@ def ai_scope_context(limits):
 
 ROLE_CAPABILITIES = {
     "EMPLOYEE": frozenset({"leave.read_self", "leave.draft_self", "attendance.read_self", "attendance.draft_fix_self", "knowledge.read", "report.create", "report.read_self", "report.analyze"}),
-    "MANAGER": frozenset({"leave.read_self", "leave.draft_self", "attendance.read_self", "attendance.draft_fix_self", "knowledge.read", "report.create", "report.read_self", "report.read_direct_reports", "report.analyze"}),
-    "HR": frozenset({"leave.read_self", "leave.draft_self", "attendance.read_self", "attendance.draft_fix_self", "knowledge.read", "knowledge.manage", "report.create", "report.read_self", "report.read_direct_reports", "report.read_company", "report.analyze"}),
-    "ADMIN": frozenset({"leave.read_self", "leave.draft_self", "attendance.read_self", "attendance.draft_fix_self", "knowledge.read", "knowledge.manage", "report.create", "report.read_self", "report.read_direct_reports", "report.read_company", "report.analyze"}),
+    "MANAGER": frozenset({"leave.read_self", "leave.draft_self", "attendance.read_self", "attendance.draft_fix_self", "knowledge.read", "report.create", "report.headcount", "report.read_self", "report.read_direct_reports", "report.analyze"}),
+    "HR": frozenset({"leave.read_self", "leave.draft_self", "attendance.read_self", "attendance.draft_fix_self", "knowledge.read", "knowledge.manage", "report.create", "report.headcount", "report.read_self", "report.read_direct_reports", "report.read_company", "report.analyze"}),
+    "ADMIN": frozenset({"leave.read_self", "leave.draft_self", "attendance.read_self", "attendance.draft_fix_self", "knowledge.read", "knowledge.manage", "report.create", "report.headcount", "report.read_self", "report.read_direct_reports", "report.read_company", "report.analyze"}),
 }
 
 

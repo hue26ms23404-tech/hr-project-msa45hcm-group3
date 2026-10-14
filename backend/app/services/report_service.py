@@ -16,6 +16,7 @@ from app.models.attendance import AttendanceDay, AttendanceFix
 from app.models.leave import LeaveRequest, EmployeeLeaveBalance
 from app.models.payroll import PayrollPeriod, PayrollLine
 from app.services.ai_access import report_scope, user_roles, require_reviewer_role
+from app.core.authorization import require_capability
 
 MAX_REPORT_ROWS = 10000
 
@@ -306,7 +307,9 @@ class ReportService:
                 statement = statement.where(Employee.department_id == department_id)
             ids = list((await db.scalars(statement.order_by(PayrollLine.employee_id).limit(MAX_REPORT_ROWS + 1))).all())
             return "COMPANY", check_report_size(ids)
-        if kind in {"HEADCOUNT", "APPROVAL_QUEUE"} and not roles & {"MANAGER", "HR", "ADMIN"}:
+        if kind == "HEADCOUNT":
+            require_capability(roles, "report.headcount")
+        if kind == "APPROVAL_QUEUE" and not roles & {"MANAGER", "HR", "ADMIN"}:
             raise HTTPException(status_code=403, detail="AI_ACCESS_DENIED")
         if kind == "APPROVAL_QUEUE" and scope not in {None, "DIRECT_REPORTS"}:
             raise HTTPException(403, "AI_ACCESS_DENIED")
@@ -407,7 +410,8 @@ class ReportService:
                 "kind": kind, "scope": resolved_scope, "start_date": start, "end_date": end,
                 "rows": rows, "note": note,
             }
-        if kind == "HEADCOUNT" and not roles & {"MANAGER", "HR", "ADMIN"}:
+        if kind == "HEADCOUNT":
+            require_capability(roles, "report.headcount")
             raise HTTPException(status_code=403, detail="AI_ACCESS_DENIED")
         if kind == "APPROVAL_QUEUE" and not roles & {"MANAGER", "HR", "ADMIN"}:
             raise HTTPException(status_code=403, detail="AI_ACCESS_DENIED")

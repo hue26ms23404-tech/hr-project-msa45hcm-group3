@@ -24,7 +24,7 @@ SUGGESTIONS = {
     "attendance_approval_queue": SuggestionDefinition("Mở các giải trình chấm công đang chờ tôi duyệt", "report.read_direct_reports", "attendance_policy", True),
     "team_attendance_report": SuggestionDefinition("Tạo báo cáo công nhân viên trực tiếp tháng này", "report.read_direct_reports", "report_security", True),
     "team_leave_report": SuggestionDefinition("Tạo báo cáo nghỉ phép nhóm tháng này", "report.read_direct_reports", "report_security", True),
-    "headcount_report": SuggestionDefinition("Mở thống kê headcount hiện tại", "report.create", "report_security"),
+    "headcount_report": SuggestionDefinition("Mở thống kê headcount hiện tại", "report.headcount", "report_security"),
     "company_attendance_report": SuggestionDefinition("Tạo báo cáo công toàn công ty tháng này", "report.read_company", "report_security"),
     "payroll_summary": SuggestionDefinition("Tạo báo cáo tổng hợp lương tháng trước", "report.read_company", "report_security"),
     "knowledge_admin": SuggestionDefinition("Mở quản lý tài liệu nội quy", "knowledge.manage", "report_security"),
@@ -34,11 +34,27 @@ SUGGESTIONS = {
 }
 
 
+def suggestion_allowed(suggestion_id: str, roles: set[str], employee_id: int | None) -> bool:
+    """Keep suggestion visibility consistent with the report catalog scopes."""
+    definition = SUGGESTIONS.get(suggestion_id)
+    if definition is None:
+        return False
+    actor_caps = capabilities(roles)
+    if definition.capability not in actor_caps or (definition.needs_employee and employee_id is None):
+        return False
+    # HEADCOUNT can use SELF when an employee is linked, or COMPANY when
+    # the authenticated role permits it. A manager without an employee
+    # identity has neither scope and must not see a dead-end suggestion.
+    if suggestion_id == "headcount_report":
+        return employee_id is not None or "report.read_company" in actor_caps
+    return True
+
+
 def resolve_suggestion(suggestion_id: str, roles: set[str], employee_id: int | None):
     definition = SUGGESTIONS.get(suggestion_id)
     if definition is None:
         raise HTTPException(422, "AI_SUGGESTION_INVALID")
-    if definition.capability not in capabilities(roles) or definition.needs_employee and employee_id is None:
+    if not suggestion_allowed(suggestion_id, roles, employee_id):
         raise HTTPException(403, "PERMISSION_DENIED")
     return definition
 

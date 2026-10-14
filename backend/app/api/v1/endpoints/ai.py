@@ -18,7 +18,7 @@ from app.core.authorization import capabilities, known_roles
 from app.services.ai_role_scopes import scoped_ai_access
 from app.models.knowledge import KnowledgeDocument, KnowledgeDocumentVersion, KnowledgeSection
 from app.services.ai_request_security import secured_operation
-from app.services.ai_suggestions import SUGGESTIONS, section_unavailability, unique_visible_sections
+from app.services.ai_suggestions import SUGGESTIONS, section_unavailability, suggestion_allowed, unique_visible_sections
 from app.services.ai_report_draft_service import suggestion_report_defaults
 from app.services.ai_knowledge_tool import AIKnowledgeTool
 from app.services.knowledge_retrieval import retrieve
@@ -38,11 +38,9 @@ async def get_suggestions(
     roles = known_roles(user_roles(current_user))
     allowed_roles = allowed_knowledge_roles(roles)
     policy_ids = {"leave_policy", "attendance_policy", "report_security"}
-    actor_capabilities = capabilities(roles)
     suggestions = [AISuggestion(suggestion_id=key, prompt=value.prompt)
         for key, value in SUGGESTIONS.items()
-        if key not in policy_ids and value.capability in actor_capabilities
-        and (not value.needs_employee or current_user.employee_id is not None)]
+        if key not in policy_ids and suggestion_allowed(key, roles, current_user.employee_id)]
 
     # Add policy prompts only when an answerable, currently published PDF is readable.
     citation_specs = [

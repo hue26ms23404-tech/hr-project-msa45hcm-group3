@@ -169,6 +169,7 @@ async def test_suggestion_actions_reference_the_relevant_published_section(api_c
     assert entries["my_attendance_report"]["source"]["section_code"] == "REPORT.CATALOG"
     assert "tham khảo mục LEAVE.REQUEST" in entries["draft_leave"]["prompt"]
     assert "payroll_summary" not in entries
+    assert "headcount_report" not in entries
     assert db.execute.call_count == 1
     for call in db.execute.call_args_list:
         query = str(call.args[0].compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
@@ -542,3 +543,17 @@ async def test_duplicate_published_policy_sections_keep_suggestion_without_wrong
     assert entries["leave_policy"]["source"] is None
     assert entries["attendance_policy"]["source"]["section_code"] == "ATTENDANCE.FIX"
     assert db.execute.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_headcount_suggestion_is_hidden_for_employee_and_visible_to_manager(api_context):
+    app, user, db = api_context
+    db.execute.return_value = SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: []))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        employee = await client.get("/ai/suggestions")
+        assert employee.status_code == 200
+        assert "headcount_report" not in {item["suggestion_id"] for item in employee.json()}
+        user.role_assignments[0].role.role_code = "MANAGER"
+        manager = await client.get("/ai/suggestions")
+        assert manager.status_code == 200
+        assert "headcount_report" in {item["suggestion_id"] for item in manager.json()}
