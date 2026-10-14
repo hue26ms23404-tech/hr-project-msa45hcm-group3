@@ -97,3 +97,17 @@ def test_more_natural_date_alternatives_cannot_select_one_day(message):
 ])
 def test_single_date_not_misclassified_as_range(message):
     assert dates.resolve_rule_date(message, date(2026, 10, 13)).status == "RESOLVED"
+
+
+@pytest.mark.asyncio
+async def test_date_provider_receives_only_temporal_vocabulary(monkeypatch):
+    import json
+    provider = AsyncMock(return_value=AIChatDateResult(date=None))
+    monkeypatch.setattr(dates, "generate_json", provider)
+    message = "ngày thứ hai tuần liền kề do tôi đang điều trị ung thư"
+    await dates.resolve_date(message, date(2026, 10, 14), dates.DateContext("leave_date"))
+    prompt = json.loads(provider.await_args.args[1])
+    assert prompt["date_text"] == "ngay thu hai tuan lien ke"
+    assert "ung thu" not in provider.await_args.args[1]
+    assert "dieu tri" not in provider.await_args.args[1]
+

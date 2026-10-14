@@ -206,3 +206,24 @@ async def test_next_month_needs_no_provider_and_revision_keeps_scope(monkeypatch
     await AIReportDraftService.revise_run(db,actor(),"a"*32,"đổi sang tháng sau",date(2026,10,8))
     assert start.await_args.args[4] == {"kind":"ATTENDANCE","scope":"SELF","start_date":"2026-11-01","end_date":"2026-11-30"}
     provider.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_completed_report_draft_replay_never_creates_second_report(monkeypatch):
+    from app.services import ai_report_draft_service as module
+    draft = SimpleNamespace(draft_id="00000000-0000-4000-8000-000000000000",
+        revision=5, status="READY", missing_fields=[],
+        typed_params={"kind": "ATTENDANCE", "scope": "SELF",
+                      "start_date": "2026-10-01", "end_date": "2026-10-14"})
+    create = AsyncMock(side_effect=AssertionError("Never persist a completed report twice"))
+    interpreter = AsyncMock(return_value={})
+    monkeypatch.setattr(ReportRunService, "create", create)
+    monkeypatch.setattr(module, "interpret_report_prompt", interpreter)
+    with pytest.raises(HTTPException) as e:
+        await AIReportDraftService.continue_draft(AsyncMock(), actor(), draft, "không đổi", date(2026, 10, 14))
+    assert e.value.status_code == 409
+    create.assert_not_awaited()
+    interpreter.assert_not_awaited()
+    with pytest.raises(HTTPException):
+        await AIReportDraftService.finish_or_ask(AsyncMock(), actor(), draft)
+    create.assert_not_awaited()

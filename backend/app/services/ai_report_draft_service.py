@@ -77,6 +77,8 @@ class AIReportDraftService:
 
     @staticmethod
     async def continue_draft(db, user, draft, message, today, inputs=None):
+        if draft.status != "COLLECTING":
+            raise HTTPException(409, "AI_DRAFT_NOT_COLLECTING")
         AIReportDraftService.validate_access(user, {})
         answers = {**await interpret_report_prompt(message, today, user, draft.typed_params),
                    **report_answers(message, today, draft.typed_params, draft.missing_fields)}
@@ -114,6 +116,10 @@ class AIReportDraftService:
 
     @staticmethod
     async def finish_or_ask(db, user, draft):
+        # Reject a completed draft before ReportRunService can commit a new
+        # snapshot in its independent storage transaction.
+        if draft.status != "COLLECTING":
+            raise HTTPException(409, "AI_DRAFT_NOT_COLLECTING")
         AIReportDraftService.validate_access(user, draft.typed_params)
         if draft.missing_fields:
             field = draft.missing_fields[0]
