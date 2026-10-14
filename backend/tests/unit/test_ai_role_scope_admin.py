@@ -66,3 +66,14 @@ async def test_non_admin_cannot_change_or_list_policy():
     db.scalar.assert_not_awaited()
     with pytest.raises(HTTPException):
         require_ai_admin(actor("MANAGER"))
+
+
+@pytest.mark.asyncio
+async def test_role_policy_database_outage_fails_closed():
+    from sqlalchemy.exc import SQLAlchemyError
+    db = AsyncMock()
+    db.execute.side_effect = SQLAlchemyError("Database unavailable")
+    with pytest.raises(HTTPException) as exc:
+        await load_ai_scopes(db)
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "DATA_SERVICE_UNAVAILABLE"
