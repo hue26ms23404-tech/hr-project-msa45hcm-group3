@@ -111,3 +111,23 @@ async def test_date_provider_receives_only_temporal_vocabulary(monkeypatch):
     assert "ung thu" not in provider.await_args.args[1]
     assert "dieu tri" not in provider.await_args.args[1]
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message,expected", [
+    ("ngày hai mươi tháng mười một", "ngay hai muoi thang muoi mot"),
+    ("ngày hai mươi bốn tháng tám", "ngay hai muoi bon thang tam"),
+    ("ngày chín tháng mười một", "ngay chin thang muoi mot"),
+    ("ngày mười lăm tháng mười một", "ngay muoi lam thang muoi mot"),
+])
+async def test_date_provider_keeps_vietnamese_number_words(monkeypatch, message, expected):
+    import json
+    provider = AsyncMock(return_value=AIChatDateResult(date=None))
+    monkeypatch.setattr(dates, "generate_json", provider)
+    result = await dates.resolve_date(
+        message + " vì tôi đang điều trị bệnh riêng",
+        date(2026, 10, 14), dates.DateContext("leave_date"),
+    )
+    assert result.status == "AMBIGUOUS"
+    payload = json.loads(provider.await_args.args[1])
+    assert payload["date_text"] == expected
+    assert "dieu tri" not in provider.await_args.args[1]

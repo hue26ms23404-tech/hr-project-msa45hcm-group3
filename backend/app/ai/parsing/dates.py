@@ -143,7 +143,10 @@ async def resolve_date(message: str, today: date, context: DateContext) -> DateR
                   "sang", "chieu", "hai", "ba", "tu", "nam", "sau", "bay",
                   "chu", "nhat", "nay", "toi", "truoc", "lien", "ke",
                   "dau", "tien", "cuoi", "cung", "cua", "trong",
-                  "den", "va", "hoac", "mot", "kia", "nua"}
+                  "den", "va", "hoac", "mot", "kia", "nua",
+                  # Spelled-out Vietnamese date numerals (including 15, 20-31).
+                  "bon", "tam", "chin", "muoi", "lam", "linh", "le",
+                  "khong", "tram", "nghin"}
     start = next((i for i, word in enumerate(words) if word in
                   {"ngay", "mung", "thu", "tuan", "thang", "hom", "mai"}), None)
     date_tokens = []

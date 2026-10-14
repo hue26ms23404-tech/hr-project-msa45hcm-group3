@@ -92,8 +92,8 @@ class ChatOrchestrator:
 
         # A new question while collecting a draft is NOT a value for the
         # remaining form field (especially the free-text "reason" field).
-        if (req.draft_id and not req.inputs and owner_user_account_id is not None
-                and not text.startswith(("ly do:", "vi:", "boi vi:"))):
+        explicit_draft_reply = bool(req.inputs) or text.startswith(("ly do:", "vi:", "boi vi:"))
+        if (req.draft_id and not explicit_draft_reply and owner_user_account_id is not None):
             interruption = policy_question and not knowledge_management and not report_request
             competing_action = (
                 report_request or knowledge_management or
@@ -130,7 +130,7 @@ class ChatOrchestrator:
 
         personal_lookup = is_leave_balance_query(text) or any(
             term in text for term in ("tinh trang cham cong", "ngay thieu cong", "cham cong cua toi"))
-        if req.draft_id and personal_lookup:
+        if req.draft_id and personal_lookup and not explicit_draft_reply:
             if owner_user_account_id is None:
                 raise HTTPException(403, "PERMISSION_DENIED")
             draft = await AIDraftService.get_draft(db, req.draft_id, owner_user_account_id)
