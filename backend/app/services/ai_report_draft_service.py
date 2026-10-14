@@ -1,6 +1,8 @@
 """Owner-bound report tools; Python parses common filters, Gemini supplies typed hints."""
 from sqlalchemy import select
 from datetime import datetime, timezone
+from uuid import uuid5, NAMESPACE_URL
+from app.services.report_access import authorized_run
 from app.models.knowledge import ReportRun
 
 from fastapi import HTTPException
@@ -73,6 +75,13 @@ class AIReportDraftService:
         AIReportDraftService.validate_access(user, params)
         missing = [key for key in REQUIRED if key not in params]
         draft = await AIDraftService.create_draft(db, user.user_account_id, "DRAFT_REPORT", params, missing)
+        if draft.status == "READY":
+            # Initial POST replay after an acknowledged or lost response:
+            # reuse the exact persisted run without creating a second one.
+            run_id = uuid5(NAMESPACE_URL, f"hr-ai-report-draft:{draft.draft_id}").hex
+            run = await authorized_run(db, user, run_id)
+            req = ReportRunCreate.model_validate(draft.typed_params)
+            return AIReportDraftService.completed_response(draft, req, run)
         return await AIReportDraftService.finish_or_ask(db, user, draft)
 
     @staticmethod
@@ -138,5 +147,9 @@ class AIReportDraftService:
             raise HTTPException(422, "INVALID_INPUT") from exc
         result = await ReportRunService.create(db, user, req, source_draft_id=draft.draft_id)
         await AIDraftService.mark_ready(db, draft.draft_id, user.user_account_id)
+        return AIReportDraftService.completed_response(draft, req, result["run"])
+
+    @staticmethod
+    def completed_response(draft, req, run):
         scope_label = {"SELF": "bản thân", "DIRECT_REPORTS": "nhân viên trực tiếp", "COMPANY": "toàn công ty"}[req.scope]
-        return AIChatResponse(reply=f"Đã tạo báo cáo từ {req.start_date:%d/%m/%Y} đến {req.end_date:%d/%m/%Y}, phạm vi {scope_label}. Bạn có thể xem trước và tải Excel.", action=AIChatAction(action_type="OPEN_REPORT", data={"path": "/reports", **draft.typed_params, "run_id": result["run"].run_id}))
+        return AIChatResponse(reply=f"Đã tạo báo cáo từ {req.start_date:%d/%m/%Y} đến {req.end_date:%d/%m/%Y}, phạm vi {scope_label}. Bạn có thể xem trước và tải Excel.", action=AIChatAction(action_type="OPEN_REPORT", data={"path": "/reports", **draft.typed_params, "run_id": run.run_id}))

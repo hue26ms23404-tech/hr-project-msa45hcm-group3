@@ -125,3 +125,27 @@ async def test_update_requires_collecting_status():
     assert exc.value.status_code == 409
     assert exc.value.detail == "AI_DRAFT_NOT_COLLECTING"
     db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_replayed_client_operation_reuses_the_original_draft():
+    from app.services.ai_request_security import request_context
+    from app.services.ai_draft_service import AIDraftService
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from uuid import uuid5, NAMESPACE_URL
+    db = AsyncMock()
+    db.add = Mock()
+    db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: None)
+    key = "chat:9:" + "a" * 32
+    with request_context(key):
+        first = await AIDraftService.create_draft(db, 9, "DRAFT_LEAVE", {}, ["leave_date"])
+        assert first.draft_id == str(uuid5(NAMESPACE_URL, f"hr-ai-draft:9:{key}:DRAFT_LEAVE"))
+        db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: first)
+        replay = await AIDraftService.create_draft(db, 9, "DRAFT_LEAVE", {}, ["leave_date"])
+        assert replay is first
+        db.add.assert_called_once()
+        with pytest.raises(HTTPException) as conflict:
+            await AIDraftService.create_draft(db, 9, "DRAFT_LEAVE",
+                {"leave_date": "2026-10-15"}, [])
+        assert conflict.value.status_code == 409

@@ -52,6 +52,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
   const [reference, setReference] = useState<{ title: string; content: string; source_url?: string | null } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const actorIdRef = useRef(actorId);
+  const uncertainRequestRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -76,6 +77,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       setEditingRunId(null);
       setPreviewRunId(null);
       setRetryMessage(null);
+      uncertainRequestRef.current = null;
     }
   }, [actorId]);
 
@@ -112,6 +114,17 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
     setInputVal('');
     setLoading(true);
     const requestActorId = actorId;
+    // An uncertain previous outcome must reuse the same operation identity.
+    // This is NOT a bearer credential; authorization remains server-side.
+    const fingerprint = JSON.stringify({
+      actorId, text, startNew, suggestionId, inputs,
+      draft: startNew ? null : activeDraftId,
+      revision: startNew ? null : activeDraftRevision,
+    });
+    const requestKey = uncertainRequestRef.current?.fingerprint === fingerprint
+      ? uncertainRequestRef.current.key
+      : crypto.randomUUID().replaceAll('-', '');
+    uncertainRequestRef.current = { fingerprint, key: requestKey };
 
     try {
       const history = messages.slice(-6).map((m) => ({
@@ -121,6 +134,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
 
       const request: AIChatRequest = {
         message: text,
+        request_key: requestKey,
         ...((editingRunId || lastReportRunId && /báo cáo (này|vừa)|bao cao (nay|vua)|this report/i.test(text)) && !startNew && !activeDraftId
           ? { report_run_id: editingRunId || lastReportRunId! } : {}),
         conversation_history: history,
@@ -130,6 +144,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       };
       const res = await api.post<AIChatResponse>('/ai/chat', request);
       if (actorIdRef.current !== requestActorId) return;
+      uncertainRequestRef.current = null;
       if (res.data.action?.action_type === 'OPEN_REPORT' && res.data.action.data.run_id) {
         setLastReportRunId(res.data.action.data.run_id);
         setPreviewRunId(res.data.action.data.run_id); setEditingRunId(null);
@@ -157,6 +172,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
       const status = err?.response?.status;
       const code = err?.response?.data?.detail;
       const failure = chatFailureState(status, code);
+      if (!failure.uncertainOutcome && !failure.retryable) uncertainRequestRef.current = null;
       if (failure.clearDraft) {
         setActiveDraftId(null); setActiveDraftRevision(null); setMissingFields([]);
         setInputOptions([]); setDraftRestartRequired(false);
@@ -213,6 +229,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
     setInputOptions([]);
     setDraftRestartRequired(false);
     setRetryMessage(null);
+    uncertainRequestRef.current = null;
     setMessages([]);
     setInputVal('');
     setPreviewRunId(null);

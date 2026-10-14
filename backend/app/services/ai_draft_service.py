@@ -1,7 +1,8 @@
 """Owner-scoped persistence for multi-turn AI action drafts."""
 
 from datetime import date, datetime, time, timedelta, timezone
-from uuid import uuid4
+from uuid import uuid4, uuid5, NAMESPACE_URL
+from app.services.ai_request_security import current_request_id
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -81,8 +82,21 @@ class AIDraftService:
         missing_fields = [] if missing_fields is None else missing_fields
         AIDraftService._validate_missing_fields(command, missing_fields)
         now = utc_now()
+        operation_id = current_request_id()
+        draft_id = (str(uuid5(NAMESPACE_URL, f"hr-ai-draft:{owner_user_account_id}:{operation_id}:{command}"))
+                    if operation_id else str(uuid4()))
+        if operation_id:
+            existing = (await db.execute(select(AIChatDraft).where(
+                AIChatDraft.draft_id == draft_id,
+                AIChatDraft.owner_user_account_id == owner_user_account_id,
+            ).with_for_update())).scalar_one_or_none()
+            if existing is not None:
+                if (existing.command != command or existing.typed_params != typed_params
+                        or existing.missing_fields != missing_fields):
+                    raise HTTPException(409, "AI_DRAFT_IDEMPOTENCY_CONFLICT")
+                return existing
         draft = AIChatDraft(
-            draft_id=str(uuid4()),
+            draft_id=draft_id,
             owner_user_account_id=owner_user_account_id,
             command=command,
             typed_params=dict(typed_params),

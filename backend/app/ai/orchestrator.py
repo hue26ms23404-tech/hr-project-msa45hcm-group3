@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.providers.gemini import record
+from app.services.ai_request_security import request_context
 from app.ai.tool_registry import ToolContext, execute_registered
 from app.core.config import settings
 from app.core.authorization import capabilities
@@ -26,6 +27,15 @@ from app.services.report_run_service import ReportRunService
 class ChatOrchestrator:
     @staticmethod
     async def process_chat(db: AsyncSession, employee_id: int, req: AIChatRequest, roles: set[str] | None = None, owner_user_account_id: int | None = None, authenticated_user=None) -> AIChatResponse:
+        # A replay of the same authenticated client operation gets the same
+        # draft ID. Never trust a key without binding it to its owner.
+        if req.request_key and owner_user_account_id is not None:
+            with request_context(f"chat:{owner_user_account_id}:{req.request_key}"):
+                return await ChatOrchestrator._process_chat(db, employee_id, req, roles, owner_user_account_id, authenticated_user)
+        return await ChatOrchestrator._process_chat(db, employee_id, req, roles, owner_user_account_id, authenticated_user)
+
+    @staticmethod
+    async def _process_chat(db: AsyncSession, employee_id: int, req: AIChatRequest, roles: set[str] | None = None, owner_user_account_id: int | None = None, authenticated_user=None) -> AIChatResponse:
         roles = roles or set()
         require_known_role(roles)
         actor_caps = capabilities(roles)

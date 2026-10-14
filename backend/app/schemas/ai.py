@@ -22,6 +22,7 @@ class AIChatRequest(BaseModel):
     draft_id: StrictStr | None = Field(default=None, min_length=36, max_length=36)
     draft_revision: StrictInt | None = Field(default=None, gt=0)
     report_run_id: StrictStr | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    request_key: StrictStr | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     suggestion_id: StrictStr | None = Field(default=None, min_length=1, max_length=80)
     inputs: dict[str, StrictStr | StrictInt] | None = None
 

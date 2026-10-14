@@ -16,7 +16,7 @@ export type AIChatAction =
   | { action_type: 'SHOW_DATA'; data: { type: 'LEAVE_BALANCE'; balance: string | null } | { type: 'ATTENDANCE_SUMMARY'; present_days: number; incomplete: string[] } };
 export interface AISuggestion { suggestion_id: string; prompt: string; catalog_version: string; source?: AISource | null; default_inputs?: Partial<ReportInputs> }
 export type AIDraftInputs = Partial<Record<'leave_date' | 'session' | 'leave_type_id' | 'reason' | 'work_date' | 'event_type' | 'requested_time' | 'kind' | 'start_date' | 'end_date' | 'scope' | 'department_id', string | number>>;
-export interface AIChatRequest { message?: string; conversation_history?: { role: 'user' | 'assistant'; content: string }[]; suggestion_id?: string; report_run_id?: string; draft_id?: string; draft_revision?: number; inputs?: AIDraftInputs }
+export interface AIChatRequest { message?: string; conversation_history?: { role: 'user' | 'assistant'; content: string }[]; suggestion_id?: string; report_run_id?: string; request_key?: string; draft_id?: string; draft_revision?: number; inputs?: AIDraftInputs }
 export interface AIInputOption { field: 'kind' | 'scope' | 'leave_type_id'; value: string | number; label: string }
 export interface AIChatResponse {
   reply: string; action: AIChatAction | null; sources: AISource[];
