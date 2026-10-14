@@ -28,3 +28,49 @@ async def test_registry_executes_only_known_authorized_intents(monkeypatch):
     result = await tool_registry.execute_registered("LEAVE_BALANCE", context({"ADMIN", "UNKNOWN"}))
     assert result.reply == "ok"
     handler.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_policy_question_during_draft_preserves_reason_and_revision(monkeypatch):
+    from types import SimpleNamespace
+    from app.ai.orchestrator import ChatOrchestrator
+    from app.services.ai_service import AIService
+    from app.services.ai_draft_service import AIDraftService
+    draft = SimpleNamespace(draft_id="a" * 36, revision=3,
+        status="COLLECTING", command="DRAFT_LEAVE", missing_fields=["reason"])
+    get_draft = AsyncMock(return_value=draft)
+    lookup = AsyncMock(return_value=AIChatResponse(reply="Chính sách phép năm hiện hành."))
+    update = AsyncMock(side_effect=AssertionError("Do not mutate draft reason"))
+    monkeypatch.setattr(AIDraftService, "get_draft", get_draft)
+    monkeypatch.setattr(AIDraftService, "update_draft", update)
+    monkeypatch.setattr(AIService, "_answer_knowledge", lookup)
+    response = await ChatOrchestrator.process_chat(
+        None, 7, AIChatRequest(message="Quy định nghỉ phép thế nào?",
+            draft_id=draft.draft_id, draft_revision=3),
+        {"EMPLOYEE"}, 9)
+    assert response.reply == "Chính sách phép năm hiện hành."
+    assert response.draft_id == draft.draft_id
+    assert response.draft_revision == 3
+    assert response.missing_fields == ["reason"]
+    assert response.status == "NEEDS_INPUT"
+    update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_switching_from_leave_draft_to_report_requires_explicit_cancel(monkeypatch):
+    from types import SimpleNamespace
+    from app.ai.orchestrator import ChatOrchestrator
+    from app.services.ai_service import AIService
+    from app.services.ai_draft_service import AIDraftService
+    draft = SimpleNamespace(draft_id="b" * 36, revision=2,
+        command="DRAFT_LEAVE", missing_fields=["reason"])
+    monkeypatch.setattr(AIDraftService, "get_draft", AsyncMock(return_value=draft))
+    continuation = AsyncMock(side_effect=AssertionError("Do not consume new report request as reason"))
+    monkeypatch.setattr(AIService, "_continue_draft", continuation)
+    response = await ChatOrchestrator.process_chat(
+        None, 7, AIChatRequest(message="Tạo báo cáo chấm công tháng này",
+             draft_id=draft.draft_id, draft_revision=2),
+        {"EMPLOYEE"}, 9)
+    assert response.message_code == "DRAFT_SWITCH_CONFIRMATION_REQUIRED"
+    assert response.draft_id == draft.draft_id
+    continuation.assert_not_awaited()

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Modal, Input, Button, Dropdown, Card, Spin, Space, Typography, message } from 'antd';
 import { SendOutlined, RobotOutlined, UserOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import api from '../api/client';
-import { acceptsServerSuggestions, actorChanged, canSubmitChat, chatFailureState, readableISODate } from '../api/aiChatState';
+import { acceptsServerSuggestions, actorChanged, canSubmitChat, chatFailureState, newChatRequestKey, readableISODate } from '../api/aiChatState';
 import { ChatReportPreview } from './ChatReportPreview';
 import { Link, useNavigate } from 'react-router-dom';
 import type { AIChatAction, AIChatResponse, AISource, AISuggestion, AIInputOption, AIDraftInputs, AIChatRequest } from '../types/ai';
@@ -123,7 +123,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
     });
     const requestKey = uncertainRequestRef.current?.fingerprint === fingerprint
       ? uncertainRequestRef.current.key
-      : crypto.randomUUID().replaceAll('-', '');
+      : newChatRequestKey();
     uncertainRequestRef.current = { fingerprint, key: requestKey };
 
     try {

@@ -90,6 +90,44 @@ class ChatOrchestrator:
                 return AIChatResponse(reply="\n".join(lines))
             return await AIReportDraftService.revise_run(db, authenticated_user, req.report_run_id, req.message, today)
 
+        # A new question while collecting a draft is NOT a value for the
+        # remaining form field (especially the free-text "reason" field).
+        if (req.draft_id and not req.inputs and owner_user_account_id is not None
+                and not text.startswith(("ly do:", "vi:", "boi vi:"))):
+            interruption = policy_question and not knowledge_management and not report_request
+            competing_action = (
+                report_request or knowledge_management or
+                (bool(re.search(r"\b(?:xin nghi|tao don nghi|tao giai trinh|quen check-in|quen check-out)\b", text))
+                 and not (req.message.lower().startswith("lý do")))
+            )
+            if interruption or competing_action:
+                active = await AIDraftService.get_draft(db, req.draft_id, owner_user_account_id)
+                if active.revision != req.draft_revision:
+                    raise HTTPException(409, "AI_DRAFT_REVISION_CONFLICT")
+                if interruption:
+                    response = await AIService._answer_knowledge(
+                        db, roles, today, req, policy_question=True)
+                    return response.model_copy(update={
+                        "draft_id": active.draft_id,
+                        "draft_revision": active.revision,
+                        "missing_fields": active.missing_fields,
+                        "status": "NEEDS_INPUT",
+                    })
+                # Explicitly ask for a switch instead of consuming the prompt
+                # as an answer to the old draft or accidentally starting a new run.
+                if (active.command == "DRAFT_REPORT" and
+                    re.search(r"\b(?:xin nghi|tao don nghi|tao giai trinh)\b", text)
+                   ) or (active.command != "DRAFT_REPORT" and
+                         (report_request or knowledge_management)):
+                    return AIChatResponse(
+                        reply="Bạn đang có một bản nháp chưa hoàn tất. Hãy tiếp tục trả lời trường còn thiếu, hoặc gửi ‘hủy’ trước khi bắt đầu tác vụ mới.",
+                        draft_id=active.draft_id,
+                        draft_revision=active.revision,
+                        missing_fields=active.missing_fields,
+                        status="NEEDS_INPUT",
+                        message_code="DRAFT_SWITCH_CONFIRMATION_REQUIRED",
+                    )
+
         personal_lookup = is_leave_balance_query(text) or any(
             term in text for term in ("tinh trang cham cong", "ngay thieu cong", "cham cong cua toi"))
         if req.draft_id and personal_lookup:

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { acceptsServerSuggestions, actorChanged, canSubmitChat, chatFailureState, readableISODate } from '../src/api/aiChatState.ts';
+import { acceptsServerSuggestions, actorChanged, canSubmitChat, chatFailureState, newChatRequestKey, readableISODate } from '../src/api/aiChatState.ts';
 
 test('server suggestions are accepted without local role filtering', () => {
   const response = [{ suggestion_id: 'knowledge_admin', prompt: 'Mở tài liệu', catalog_version: 'v1' }];
@@ -47,4 +47,12 @@ test('a conflict blocks new sends until the user explicitly restarts', () => {
   const conflict = chatFailureState(409, 'AI_DRAFT_REVISION_CONFLICT');
   assert.equal(canSubmitChat(conflict.restartRequired), false);
   assert.equal(canSubmitChat(false), true);
+});
+
+
+test('chat request keys are unique 32-character hex tokens', () => {
+  const first = newChatRequestKey();
+  const second = newChatRequestKey();
+  assert.match(first, /^[a-f0-9]{32}$/);
+  assert.notEqual(first, second);
 });

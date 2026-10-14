@@ -34,3 +34,11 @@ export function acceptsServerSuggestions(value: unknown): value is AISuggestion[
 export function canSubmitChat(restartRequired: boolean): boolean {
   return !restartRequired;
 }
+
+
+/** Idempotency token, not authentication; supported on insecure localhost too. */
+export function newChatRequestKey(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
