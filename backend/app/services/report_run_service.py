@@ -57,7 +57,19 @@ class ReportRunService:
                     ReportRun.owner_user_account_id == user.user_account_id))
                 if existing is not None:
                     if existing.status == "READY":
-                        return {"run": existing, "report": None}
+                        # Reuse only the exact original operation; never return
+                        # an old report for a modified draft or a revoked scope.
+                        filters = existing.filters or {}
+                        expected = {
+                            "start_date": req.start_date.isoformat(),
+                            "end_date": req.end_date.isoformat(),
+                            "department_id": req.department_id,
+                        }
+                        if existing.kind != req.kind or filters != expected:
+                            raise HTTPException(409, "REPORT_ALREADY_EXISTS")
+                        from app.services.report_access import authorized_run
+                        verified = await authorized_run(db, user, run_id)
+                        return {"run": verified, "report": None}
                     # Do not create another report while the first is still
                     # generating or after an uncertain/failed attempt.
                     raise HTTPException(409, "REPORT_ALREADY_EXISTS")

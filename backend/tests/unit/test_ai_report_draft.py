@@ -242,3 +242,27 @@ async def test_report_draft_passes_stable_idempotency_key(monkeypatch):
     monkeypatch.setattr(AIDraftService, "mark_ready", AsyncMock())
     await AIReportDraftService.finish_or_ask(AsyncMock(), actor(), draft)
     assert create.await_args.kwargs["source_draft_id"] == draft.draft_id
+
+
+@pytest.mark.asyncio
+async def test_report_interpreter_never_forwards_non_temporal_private_text(monkeypatch):
+    from app.services import ai_report_interpreter as module
+    from app.schemas.reports import ReportKind
+    from app.services.ai_report_interpreter import GeminiReportInterpreter, report_temporal_hint
+    from app.schemas.reports import ReportScope
+    from app.services.ai_report_interpreter import ReportPromptResult
+    import json
+
+    secret = "đang điều trị ung thư, Nguyễn An, ann@example.com"
+    message = "Tạo báo cáo công từ thứ hai tuần liền kề do tôi " + secret
+    assert report_temporal_hint(message) == "tu thu hai tuan lien ke"
+    generate = AsyncMock(return_value=ReportPromptResult())
+    monkeypatch.setattr(module, "generate_json", generate)
+    result = await GeminiReportInterpreter().interpret(message, date(2026, 10, 14), actor())
+    assert result == {}
+    provider_payload = json.loads(generate.await_args.args[1])
+    assert provider_payload["date_hint"] == "tu thu hai tuan lien ke"
+    assert "message" not in provider_payload
+    assert "ung thu" not in generate.await_args.args[1]
+    assert "Nguyễn An" not in generate.await_args.args[1]
+    assert "example.com" not in generate.await_args.args[1]

@@ -66,9 +66,9 @@ def user(role):
 
 def test_report_scope():
     from fastapi import HTTPException
-    with pytest.raises(HTTPException) as denied:
-        employee_scope(user("EMPLOYEE"))
-    assert denied.value.status_code == 403
+    employee = str(employee_scope(user("EMPLOYEE")).compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "employee_id = 7" in employee and "manager_employee_id" not in employee
     manager = str(employee_scope(user("MANAGER")).compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
     assert "manager_employee_id = 7" in manager and " OR " not in manager
     assert "employee_id = 7" in str(employee_scope(user("MANAGER"), "SELF").compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
@@ -366,9 +366,10 @@ async def test_free_prompt_does_not_load_personal_context(context):
 @pytest.mark.asyncio
 async def test_headcount_chat_shortcut_is_denied_for_employee(context):
     from fastapi import HTTPException
-    with pytest.raises(HTTPException) as denied:
-        await AIService.process_chat(None, 7, AIChatRequest(message="Mở thống kê headcount hiện tại"), {"EMPLOYEE"})
-    assert denied.value.status_code == 403
+    denied = await AIService.process_chat(
+        None, 7, AIChatRequest(message="Mở thống kê headcount hiện tại"), {"EMPLOYEE"})
+    assert denied.action is None and denied.answer_mode == "OUT_OF_SCOPE"
+    assert "Bạn không có quyền" in denied.reply
 
 
 @pytest.mark.asyncio
