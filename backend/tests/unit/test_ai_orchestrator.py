@@ -74,3 +74,31 @@ async def test_switching_from_leave_draft_to_report_requires_explicit_cancel(mon
     assert response.message_code == "DRAFT_SWITCH_CONFIRMATION_REQUIRED"
     assert response.draft_id == draft.draft_id
     continuation.assert_not_awaited()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message,inputs", [
+    ("Lý do: tôi muốn dùng số dư phép còn lại", None),
+    ("Cho tôi xem số dư phép còn lại", {"reason": "Việc gia đình"}),
+])
+async def test_explicit_draft_reason_not_routed_to_balance_lookup(monkeypatch, message, inputs):
+    from app.ai import orchestrator
+    from app.ai.orchestrator import ChatOrchestrator
+    from app.services.ai_service import AIService
+    from app.services.ai_draft_service import AIDraftService
+
+    continuation = AsyncMock(return_value=AIChatResponse(reply="Đã ghi nhận lý do."))
+    monkeypatch.setattr(AIService, "_continue_draft", continuation)
+    monkeypatch.setattr(AIDraftService, "get_draft",
+                        AsyncMock(side_effect=AssertionError("Do not interrupt explicit draft input")))
+    monkeypatch.setattr(orchestrator, "execute_registered",
+                        AsyncMock(side_effect=AssertionError("Do not look up leave balance")))
+    draft_id = "c" * 36
+    result = await ChatOrchestrator.process_chat(
+        None, 7, AIChatRequest(
+            message=message, draft_id=draft_id, draft_revision=3, inputs=inputs
+        ), {"EMPLOYEE"}, 9,
+    )
+    assert result.reply == "Đã ghi nhận lý do."
+    continuation.assert_awaited_once()
+    assert continuation.await_args.args[2:5] == (draft_id, message, 7)
+    assert continuation.await_args.args[6] == inputs
