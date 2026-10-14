@@ -389,6 +389,8 @@ async def test_unrelated_followup_does_not_inherit_policy_sources(context):
 @pytest.mark.asyncio
 async def test_gemini_timeout_and_ungrounded_output_fall_back(context, monkeypatch):
     from app.services import ai_service as module
+    # The mocked operation is policy generation, not semantic planning.
+    monkeypatch.setattr(module.settings, "GEMINI_SEMANTIC_ENABLED", False)
     from app.schemas.ai import AIChatMessage
     doc = SimpleNamespace(document_id=1, title="Giờ làm việc", content="Giờ làm việc từ 08:00 đến 17:00.", source_url=None, status="PUBLISHED")
     db = AsyncMock()

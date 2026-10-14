@@ -188,6 +188,8 @@ async def test_partial_name_requires_confirmation_before_any_balance_lookup():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("message", ["Nguyễn Văn An còn được nghỉ mấy ngày?", "Nguyễn Văn An còn bao nhiêu ngày phép?"])
 async def test_name_first_request_reaches_gemini_before_knowledge_retrieval(monkeypatch, message):
+    # This exercises the compatibility router's employee-query adapter.
+    monkeypatch.setattr(module.settings, "GEMINI_SEMANTIC_ENABLED", False)
     monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
     generate = AsyncMock(return_value=EmployeeQuery(intent="LEAVE_BALANCE", employee_reference="Nguyễn Văn An"))
     monkeypatch.setattr(module, "generate_json", generate)

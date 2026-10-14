@@ -55,6 +55,15 @@ Kiểm tra tên có/không dấu, viết thường và khoảng trắng thừa v
 
 Regression cần kiểm tra: “Tôi là nhân viên muốn xem số dư phép của tôi” là tra bản thân; “Tôi muốn biết lý do bị trừ ngày phép” giữ nguyên nội dung. Nếu mô hình trả SELF cho câu chỉ nêu tên người khác, backend phải hỏi rõ, không gọi tra cứu cá nhân. Từ báo cáo có employee filter, đổi “toàn công ty” phải bỏ filter kể cả scope cũ đã là COMPANY; đổi HEADCOUNT phải bỏ employee filter cũ; đổi kỳ vẫn giữ đúng người. Manager đổi sang COMPANY vẫn bị từ chối. Backend integration tests có ghi/xóa dữ liệu, cần DB test riêng đã migrate và seed; không chạy `tests/test_api.py` trên DB demo đang dùng. Test payroll phải kiểm tra export bị từ chối trước phát hành và thành công sau khi chốt kỳ.
 
+Backend unit CI chạy `python -m pytest -q tests/unit` với `GEMINI_ENABLED=false` và semantic routing mặc định `true`. Test compatibility phải tự đặt `GEMINI_SEMANTIC_ENABLED=false` trong `monkeypatch`; test semantic bật rõ ràng và mock planner. `tests/unit/conftest.py` chặn tạo SDK client chưa mock và làm test fail cả khi fallback đã bắt exception. Khi tái hiện CI tại `backend/` trong Conda `hr-backend`, dùng các biến dưới đây để độc lập với cấu hình `.env` của máy:
+
+```powershell
+$env:GEMINI_ENABLED = 'false'
+$env:GEMINI_SEMANTIC_ENABLED = 'true'
+$env:GEMINI_API_KEY = 'unit-test-no-real-key'
+python -B -m pytest -q tests/unit
+```
+
 Tra cứu luật/chính sách công khai dùng Google Search grounding qua cùng key/model; Google có hạn mức/quyền sử dụng công cụ Search riêng, nên probe JSON đạt chưa chứng minh Search hoạt động. `GEMINI_PUBLIC_SEARCH_ENABLED` mặc định `true`, chỉ có hiệu lực khi Gemini bật; timeout `GEMINI_PUBLIC_SEARCH_TIMEOUT_SECONDS` mặc định 30s (5–45s), không retry tự động. Cần mạng tới Gemini và `vertexaisearch.cloud.google.com` để resolve link nguồn. Khi trả 429, kiểm tra quota/billing của project Google; ứng dụng giữ mã chẩn đoán `PUBLIC_SEARCH_QUOTA_EXCEEDED`, chat chỉ hướng dẫn thử lại hoặc liên hệ HR, không tự đổi key/model. Chỉ thử câu hỏi công khai không có hồ sơ cá nhân; kiểm tra “Nguồn công khai” trỏ văn bản cơ quan nhà nước và phân biệt với quy định công ty. Không có dependency/migration mới cho các bước này.
 
 UI chat gom trích dẫn PDF theo tài liệu/phiên bản và giữ đúng số nguồn/mục/trang; menu gợi ý rút phần tham khảo tự sinh khỏi nhãn nhưng vẫn gửi prompt/ID gốc. Kiểm tra menu và nguồn trên desktop/mobile sau build; `npm run build` là kiểm tra compile/bundle, không thay thế kiểm tra bố cục browser.

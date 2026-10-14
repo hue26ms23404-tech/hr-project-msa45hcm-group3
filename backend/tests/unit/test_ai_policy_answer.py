@@ -39,6 +39,8 @@ def test_grounding_rejects_forged_sources_evidence_and_numbers(source, text, evi
 ])
 async def test_gemini_writes_dynamic_paraphrase_for_existing_or_new_policy(monkeypatch, question, content, response):
     from app.services import ai_service as module
+    # Isolate policy generation from the separately tested semantic planner.
+    monkeypatch.setattr(module.settings, 'GEMINI_SEMANTIC_ENABLED', False)
     monkeypatch.setattr(module.settings, 'GEMINI_ENABLED', True)
     monkeypatch.setattr(module.settings, 'GEMINI_API_KEY', 'test-key')
     model = AsyncMock(return_value=AIGroundedAnswer(statements=[
