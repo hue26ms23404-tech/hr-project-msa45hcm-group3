@@ -412,7 +412,6 @@ class ReportService:
             }
         if kind == "HEADCOUNT":
             require_capability(roles, "report.headcount")
-            raise HTTPException(status_code=403, detail="AI_ACCESS_DENIED")
         if kind == "APPROVAL_QUEUE" and not roles & {"MANAGER", "HR", "ADMIN"}:
             raise HTTPException(status_code=403, detail="AI_ACCESS_DENIED")
         if kind == "APPROVAL_QUEUE" and scope not in {None, "DIRECT_REPORTS"}:

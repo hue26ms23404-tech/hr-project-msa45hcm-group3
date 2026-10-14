@@ -41,6 +41,33 @@ async def test_additional_reports_filter_manager_scope_before_return(kind, expec
         assert "manager_employee_id" in sql
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,scope,expected_fragment", [
+    ("MANAGER", "DIRECT_REPORTS", "manager_employee_id"),
+    ("HR", "COMPANY", "GROUP BY"),
+    ("ADMIN", "COMPANY", "GROUP BY"),
+])
+async def test_authorized_headcount_reaches_grouped_database_query(role, scope, expected_fragment):
+    # Regression: capability verification must not be followed by a
+    # blanket 403 before the HEADCOUNT aggregation.
+    db = AsyncMock()
+    db.execute.return_value = empty_rows()
+    report = await ReportService.generate(
+        db, user(role), "HEADCOUNT",
+        date(2026, 10, 1), date(2026, 10, 31), None, scope,
+    )
+    assert report["kind"] == "HEADCOUNT"
+    assert report["scope"] == scope
+    assert report["rows"] == []
+    db.execute.assert_awaited_once()
+    query = str(db.execute.await_args.args[0].compile(dialect=postgresql.dialect()))
+    assert expected_fragment in query
+    if scope == "COMPANY":
+        assert "manager_employee_id" not in query
+
+
+
 @pytest.mark.asyncio
 async def test_employee_cannot_create_headcount_report():
     db = AsyncMock()
