@@ -165,7 +165,7 @@ class AIService:
             kind = report_kinds[intent]
             if authenticated_user is not None:
                 return await AIReportDraftService.start(db, authenticated_user, req.message, business_today(), {"kind": kind})
-            if kind == "HEADCOUNT" and "report.create" not in capabilities(roles):
+            if kind == "HEADCOUNT" and "report.read_direct_reports" not in capabilities(roles):
                 return AIChatResponse(reply="Bạn không có quyền thực hiện yêu cầu này hoặc truy cập dữ liệu được yêu cầu. Vui lòng chọn chức năng trong phạm vi quyền của bạn.", answer_mode="OUT_OF_SCOPE")
             today = business_today()
             return AIChatResponse(

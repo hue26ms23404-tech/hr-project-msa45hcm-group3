@@ -330,15 +330,9 @@ async def test_unknown_role_is_rejected_before_any_database_query():
 @pytest.mark.parametrize("message", ["Tôi còn bao nhiêu phép của Nguyễn An?", "Xem công E3", "Tạo báo cáo toàn công ty"])
 async def test_foreign_or_company_requests_are_denied_before_lookup(message, context):
     db = AsyncMock()
-    if "báo cáo" in message:
-        from fastapi import HTTPException
-        with pytest.raises(HTTPException) as denied:
-            await AIService.process_chat(db, 7, AIChatRequest(message=message), {"EMPLOYEE"})
-        assert denied.value.status_code == 403
-    else:
-        result = await AIService.process_chat(db, 7, AIChatRequest(message=message), {"EMPLOYEE"})
-        assert result.action is None
-        assert "Bạn không có quyền" in result.reply
+    result = await AIService.process_chat(db, 7, AIChatRequest(message=message), {"EMPLOYEE"})
+    assert result.action is None
+    assert "Bạn không có quyền" in result.reply
     db.execute.assert_not_called()
     AIService.get_employee_context.assert_not_awaited()
 

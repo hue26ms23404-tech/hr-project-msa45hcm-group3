@@ -126,7 +126,7 @@ class ChatOrchestrator:
             if "toan cong ty" in text and "report.read_company" not in actor_caps or any(term in text for term in ("nhom", "truc tiep")) and "report.read_direct_reports" not in actor_caps:
                 return AIChatResponse(reply="Bạn không có quyền thực hiện yêu cầu này hoặc truy cập dữ liệu được yêu cầu. Vui lòng chọn chức năng trong phạm vi quyền của bạn.", answer_mode="OUT_OF_SCOPE")
             report_kind = "PAYROLL_SUMMARY" if "tong hop luong" in text else "MY_PAYSLIP" if "phieu luong" in text else "HEADCOUNT" if "headcount" in text or "nhan su theo phong ban" in text else "APPROVAL_QUEUE" if "cho duyet" in text else "ATTENDANCE_FIX" if "giai trinh" in text else "LEAVE" if "phep" in text or "nghi" in text else "ATTENDANCE"
-            if report_kind == "PAYROLL_SUMMARY" and "report.read_company" not in actor_caps or report_kind == "HEADCOUNT" and "report.create" not in actor_caps:
+            if report_kind == "PAYROLL_SUMMARY" and "report.read_company" not in actor_caps or report_kind in {"HEADCOUNT", "APPROVAL_QUEUE"} and "report.read_direct_reports" not in actor_caps:
                 return AIChatResponse(reply="Bạn không có quyền thực hiện yêu cầu này hoặc truy cập dữ liệu được yêu cầu. Vui lòng chọn chức năng trong phạm vi quyền của bạn.", answer_mode="OUT_OF_SCOPE")
             payroll = report_kind in {"MY_PAYSLIP", "PAYROLL_SUMMARY"}
             end = today.replace(day=1) - timedelta(days=1) if "thang truoc" in text else today

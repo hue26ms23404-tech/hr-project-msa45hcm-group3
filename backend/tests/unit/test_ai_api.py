@@ -165,8 +165,8 @@ async def test_suggestion_actions_reference_the_relevant_published_section(api_c
     assert response.status_code == 200
     entries = {item["suggestion_id"]: item for item in response.json()}
     assert entries["draft_leave"]["source"]["section_code"] == "LEAVE.REQUEST"
-    assert "my_payslip" not in entries
-    assert "my_attendance_report" not in entries
+    assert entries["my_payslip"]["source"]["section_code"] == "REPORT.CATALOG"
+    assert entries["my_attendance_report"]["source"]["section_code"] == "REPORT.CATALOG"
     assert "tham khảo mục LEAVE.REQUEST" in entries["draft_leave"]["prompt"]
     assert "payroll_summary" not in entries
     assert db.execute.call_count == 1
