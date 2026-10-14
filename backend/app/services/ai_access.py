@@ -16,7 +16,7 @@ def require_reviewer_role(roles: set[str]) -> None:
 
 
 def allowed_knowledge_roles(roles: set[str]) -> list[str]:
-    require_known_role(roles)
+    require_capability(roles, "knowledge.read")
     level = max(ROLE_LEVEL[role] for role in known_roles(roles))
     return [role for role, required in ROLE_LEVEL.items() if required <= level]
 

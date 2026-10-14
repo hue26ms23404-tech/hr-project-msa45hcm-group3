@@ -15,6 +15,7 @@ from app.schemas.ai import AIChatRequest, AIChatResponse, AISuggestion, AISource
 from app.ai.orchestrator import ChatOrchestrator
 from app.services.ai_access import allowed_knowledge_roles, user_roles
 from app.core.authorization import capabilities, known_roles
+from app.services.ai_role_scopes import scoped_ai_access
 from app.models.knowledge import KnowledgeDocument, KnowledgeDocumentVersion, KnowledgeSection
 from app.services.ai_request_security import secured_operation
 from app.services.ai_suggestions import SUGGESTIONS, section_unavailability, unique_visible_sections
@@ -31,6 +32,7 @@ router = APIRouter()
 async def get_suggestions(
     db: AsyncSession = Depends(get_db),
     current_user: UserAccount = Depends(get_current_user),
+    _policy: None = Depends(scoped_ai_access),
 ):
     """Return only actions permitted by the authenticated role and citations visible to it."""
     roles = known_roles(user_roles(current_user))
@@ -162,7 +164,8 @@ async def get_suggestions(
 async def chat_with_hr_ai(
     req: AIChatRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: UserAccount = Depends(get_current_user)
+    current_user: UserAccount = Depends(get_current_user),
+    _policy: None = Depends(scoped_ai_access),
 ):
     """
     AI Assistant chat endpoint.

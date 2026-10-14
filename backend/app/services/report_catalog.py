@@ -36,7 +36,7 @@ def report_catalog(user):
     reviewer = "report.create" in actor_caps
     if not reviewer:
         return {"catalog_version": "v1", "reports": []}
-    common_scopes = (["SELF"] if employee else []) + (["DIRECT_REPORTS"] if reviewer and employee else []) + (["COMPANY"] if privileged else [])
+    common_scopes = (["SELF"] if employee else []) + (["DIRECT_REPORTS"] if "report.read_direct_reports" in actor_caps and employee else []) + (["COMPANY"] if privileged else [])
     items = []
     for kind, label in REPORT_NAMES.items():
         scopes = common_scopes
@@ -45,7 +45,7 @@ def report_catalog(user):
         elif kind == "PAYROLL_SUMMARY":
             scopes = ["COMPANY"] if privileged else []
         elif kind == "APPROVAL_QUEUE":
-            scopes = ["DIRECT_REPORTS"] if reviewer and employee else []
+            scopes = ["DIRECT_REPORTS"] if "report.read_direct_reports" in actor_caps and employee else []
         elif kind == "HEADCOUNT" and not reviewer:
             scopes = []
         if not scopes:
@@ -54,7 +54,7 @@ def report_catalog(user):
         items.append({
             "kind": kind, "label": label, "template_version": f"{kind.lower()}_v1",
             "columns": list(template_columns(kind)), "scopes": scopes,
-            "default_scope": "COMPANY" if kind in {"HEADCOUNT", "PAYROLL_SUMMARY"} and privileged else "DIRECT_REPORTS" if kind in {"HEADCOUNT", "APPROVAL_QUEUE"} else "SELF" if employee else scopes[0],
+            "default_scope": "COMPANY" if kind in {"HEADCOUNT", "PAYROLL_SUMMARY"} and privileged else "DIRECT_REPORTS" if kind in {"HEADCOUNT", "APPROVAL_QUEUE"} and "DIRECT_REPORTS" in scopes else "SELF" if "SELF" in scopes else scopes[0],
             "filters": ["start_date", "end_date"] + ([] if kind == "MY_PAYSLIP" else ["department_id"]),
             "period_rule": "CALENDAR_MONTH" if payroll else "SAME_YEAR",
             "released_statuses": ["APPROVED", "CLOSED"] if payroll else [],

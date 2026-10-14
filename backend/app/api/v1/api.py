@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     ai,
     knowledge,
     reports,
+    ai_access_admin,
 )
 
 api_router = APIRouter()
@@ -24,3 +25,5 @@ api_router.include_router(payroll.router, prefix="/payroll", tags=["Payroll"])
 api_router.include_router(ai.router, prefix="/ai", tags=["AI Assistant"])
 api_router.include_router(knowledge.router, prefix="/ai/knowledge", tags=["AI Knowledge"])
 api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])
+
+api_router.include_router(ai_access_admin.router, prefix="/ai/access", tags=["AI Access Administration"])
