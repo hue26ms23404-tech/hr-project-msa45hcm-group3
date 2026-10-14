@@ -516,3 +516,24 @@ def test_automatic_sections_skip_blank_pages_without_changing_page_numbers():
     assert [(section.page_start, section.page_end) for section in sections] == [(1, 1), (3, 3)]
     assert [section.section_code for section in sections] == ["PAGE_1", "PAGE_3"]
     assert knowledge._validate_sections(sections, ["Title\nBody", " ", "Second page\nContent"])
+
+
+@pytest.mark.asyncio
+async def test_duplicate_published_policy_sections_keep_suggestion_without_wrong_citation(api_context):
+    app, _, db = api_context
+    codes = ["LEAVE.ANNUAL", "LEAVE.ANNUAL", "ATTENDANCE.FIX",
+             "REPORT.ACCESS", "LEAVE.REQUEST", "REPORT.CATALOG"]
+    rows = [{"document_id": index + 1, "version_id": index + 10,
+             "title": f"Published policy {index}", "section_id": index + 20,
+             "section_code": code, "heading": code, "page_start": 2, "page_end": 2}
+            for index, code in enumerate(codes)]
+    db.execute.return_value = SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: rows))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/ai/suggestions")
+    assert response.status_code == 200
+    entries = {item["suggestion_id"]: item for item in response.json()}
+    assert len([item for item in response.json() if item["suggestion_id"] == "leave_policy"]) == 1
+    assert entries["leave_policy"]["prompt"] == ai.SUGGESTIONS["leave_policy"].prompt
+    assert entries["leave_policy"]["source"] is None
+    assert entries["attendance_policy"]["source"]["section_code"] == "ATTENDANCE.FIX"
+    assert db.execute.call_count == 1
