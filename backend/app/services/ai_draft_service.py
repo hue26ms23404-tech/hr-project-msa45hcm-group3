@@ -91,6 +91,9 @@ class AIDraftService:
                 AIChatDraft.owner_user_account_id == owner_user_account_id,
             ).with_for_update())).scalar_one_or_none()
             if existing is not None:
+                await AIDraftService._ensure_unexpired(db, existing)
+                if existing.status not in {"COLLECTING", "READY"}:
+                    raise HTTPException(409, "AI_DRAFT_NOT_COLLECTING")
                 if (existing.command != command or existing.typed_params != typed_params
                         or existing.missing_fields != missing_fields):
                     raise HTTPException(409, "AI_DRAFT_IDEMPOTENCY_CONFLICT")

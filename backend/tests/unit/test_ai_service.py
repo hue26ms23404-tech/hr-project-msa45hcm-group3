@@ -829,3 +829,23 @@ async def test_remote_policy_uses_authorized_knowledge_without_creating_request(
     assert "không trừ quỹ phép năm" in result.reply
     assert result.sources[0].viewer_path == "/knowledge/view/3?version=5&section=8"
     create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_replayed_completed_leave_draft_returns_prepared_form_without_mutation(monkeypatch):
+    from app.services.ai_draft_service import AIDraftService
+    from app.schemas.ai import AIChatRequest
+    values = {"leave_date": "2026-10-15", "session": "FULL_DAY",
+              "leave_type_id": 2, "reason": "Việc cá nhân"}
+    draft = SimpleNamespace(status="READY", command="DRAFT_LEAVE", typed_params=values)
+    monkeypatch.setattr(AIService, "_draft_answers_with_date", AsyncMock(return_value=values))
+    monkeypatch.setattr(AIService, "_leave_preflight", AsyncMock(return_value=None))
+    monkeypatch.setattr(AIDraftService, "create_draft", AsyncMock(return_value=draft))
+    continuation = AsyncMock(side_effect=AssertionError("READY draft must not be completed again"))
+    monkeypatch.setattr(AIService, "_continue_draft", continuation)
+    response = await AIService._start_draft(
+        AsyncMock(), 7, 9, "DRAFT_LEAVE",
+        AIChatRequest(message="Xin nghỉ ngày 15/10/2026 vì việc cá nhân"))
+    assert response.action.action_type == "DRAFT_LEAVE"
+    assert response.action.data["leave_date"] == values["leave_date"]
+    continuation.assert_not_awaited()

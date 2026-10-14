@@ -349,6 +349,25 @@ class AIService:
             return AIChatResponse(reply=question, draft_id=draft.draft_id, draft_revision=draft.revision,
                                   missing_fields=missing, message_code=f"{missing[0].upper()}_REQUIRED")
         draft = await AIDraftService.create_draft(db, owner_user_account_id, command, params, [])
+        if draft.status == "READY":
+            # The same client operation may have completed just before its
+            # response was lost. Rehydrate the already prepared form, never
+            # try to mark an already READY draft as READY again.
+            AIDraftService._validate_command_and_params(command, draft.typed_params)
+            if command == "DRAFT_LEAVE":
+                action = AIChatAction(action_type="DRAFT_LEAVE", data={
+                    key: draft.typed_params[key]
+                    for key in ("leave_date", "session", "leave_type_id", "reason")
+                })
+            else:
+                action = AIChatAction(action_type="DRAFT_FIX", data={
+                    key: draft.typed_params[key]
+                    for key in ("work_date", "event_type", "requested_time", "reason")
+                })
+            return AIChatResponse(
+                reply="Bản nháp đã được chuẩn bị trước đó. Hãy kiểm tra lại thông tin trong form trước khi gửi.",
+                action=action,
+            )
         return await AIService._continue_draft(db, owner_user_account_id, draft.draft_id, "", employee_id)
 
     @staticmethod

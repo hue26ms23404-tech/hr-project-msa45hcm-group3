@@ -149,3 +149,21 @@ async def test_replayed_client_operation_reuses_the_original_draft():
             await AIDraftService.create_draft(db, 9, "DRAFT_LEAVE",
                 {"leave_date": "2026-10-15"}, [])
         assert conflict.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_replayed_expired_draft_does_not_return_stale_form(monkeypatch):
+    from app.services.ai_request_security import request_context
+    from datetime import timedelta
+    from types import SimpleNamespace
+    existing = SimpleNamespace(
+        draft_id="a" * 36, owner_user_account_id=9, status="READY",
+        expires_at=module.utc_now() - timedelta(seconds=1),
+        command="DRAFT_LEAVE", typed_params={}, missing_fields=[],
+    )
+    db = fake_db(existing)
+    with request_context("chat:9:" + "b" * 32):
+        with pytest.raises(HTTPException) as exc:
+            await AIDraftService.create_draft(db, 9, "DRAFT_LEAVE", {}, [])
+    assert exc.value.status_code == 410
+    assert existing.status == "EXPIRED"
