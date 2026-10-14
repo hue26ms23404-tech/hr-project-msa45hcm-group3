@@ -359,7 +359,7 @@ async def test_free_prompt_does_not_load_personal_context(context):
     db = AsyncMock()
     db.execute.return_value = SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: []))
     result = await AIService.process_chat(db, 7, AIChatRequest(message="giải thích chủ đề ngoài HR"), {"EMPLOYEE"})
-    assert result.answer_mode == "OUT_OF_SCOPE"
+    assert result.message_code == "CLARIFICATION_REQUIRED"
     assert AIService.get_employee_context.await_count == 0
 
 
@@ -382,7 +382,7 @@ async def test_unrelated_followup_does_not_inherit_policy_sources(context):
     }]))
     request = AIChatRequest(message="lập trình python", conversation_history=[AIChatMessage(role="user", content="giờ làm việc")])
     result = await AIService.process_chat(db, 7, request, {"EMPLOYEE"}, owner_user_account_id=7)
-    assert result.answer_mode == "OUT_OF_SCOPE" and result.sources == []
+    assert result.message_code == "CLARIFICATION_REQUIRED" and result.sources == []
 
 
 @pytest.mark.asyncio
@@ -445,9 +445,9 @@ async def test_free_hr_prompt_without_gemini_returns_stable_unavailable_code(mon
     monkeypatch.setattr(module.settings, "GEMINI_API_KEY", "")
     db = AsyncMock()
     db.execute.return_value = SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: []))
-    with pytest.raises(HTTPException) as exc:
-        await AIService.process_chat(db, 7, AIChatRequest(message="Có thể xem giúp số phép năm của tôi không?"), {"EMPLOYEE"})
-    assert (exc.value.status_code, exc.value.detail) == (503, "AI_UNAVAILABLE")
+    response = await AIService.process_chat(db, 7, AIChatRequest(message="Có thể xem giúp số phép năm của tôi không?"), {"EMPLOYEE"})
+    assert response.message_code == "CLARIFICATION_REQUIRED"
+    assert response.status == "NEEDS_INPUT"
 
 
 @pytest.mark.asyncio
