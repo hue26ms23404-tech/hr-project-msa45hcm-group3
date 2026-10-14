@@ -372,15 +372,26 @@ class AIService:
             if policy_question or any(term in text for term in ("noi quy", "quy dinh", "chinh sach", "gio lam viec")):
                 return AIChatResponse(reply="Chưa có tài liệu nội bộ đã công bố đủ căn cứ để trả lời câu hỏi này. Vui lòng liên hệ HR để bổ sung kiến thức.", answer_mode="OUT_OF_SCOPE", message_code="KNOWLEDGE_NOT_FOUND")
             if AIService._looks_hr_related(text):
-                intent = await AIService._classify_free_intent(req.message)
-                dispatched = await AIService._dispatch_free_intent(
-                    db, employee_id, owner_user_account_id, roles, req, intent, authenticated_user
+                try:
+                    intent = await AIService._classify_free_intent(req.message)
+                except HTTPException as exc:
+                    if exc.detail != "AI_UNAVAILABLE":
+                        raise
+                    record("classify_intent", "FALLBACK_USED", category="PROVIDER_UNAVAILABLE")
+                    intent = None
+                if intent:
+                    dispatched = await AIService._dispatch_free_intent(
+                        db, employee_id, owner_user_account_id, roles, req, intent, authenticated_user
+                    )
+                    if dispatched is not None and intent != "OUT_OF_SCOPE":
+                        return dispatched
+                return AIChatResponse(
+                    reply="Tôi chưa xác định được chính xác việc bạn muốn làm. Bạn muốn: xem phép/công của mình, soạn đơn nghỉ hoặc giải trình, hỏi chính sách, hay tạo báo cáo trong phạm vi được cấp quyền? Hãy chọn gợi ý hoặc mô tả mục tiêu; tôi không tự suy đoán và không tạo dữ liệu khi chưa rõ.",
+                    message_code="CLARIFICATION_REQUIRED", status="NEEDS_INPUT",
                 )
-                if dispatched is not None:
-                    return dispatched
             return AIChatResponse(
-                reply="Tôi chỉ hỗ trợ nội quy công ty và các chức năng HR được cấp quyền. Yêu cầu này nằm ngoài phạm vi hỗ trợ.",
-                answer_mode="OUT_OF_SCOPE",
+                reply="Tôi hỗ trợ chức năng HR và các chính sách đã được công bố. Bạn muốn tra cứu phép, chấm công, đơn từ hay chính sách?",
+                message_code="CLARIFICATION_REQUIRED", status="NEEDS_INPUT",
             )
         sources = [AISource(
             document_id=p.document_id,

@@ -11,6 +11,7 @@ import {
   UserOutlined,
   RobotOutlined,
   ThunderboltOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -59,6 +60,7 @@ export const MainLayout: React.FC = () => {
       label: 'Màn hình Kiosk',
     },
     ...(hasRole(['ADMIN', 'HR']) ? [{ key: '/knowledge', icon: <RobotOutlined />, label: 'Tài liệu & chính sách' }] : []),
+    ...(hasRole(['ADMIN']) ? [{ key: '/ai-access', icon: <SafetyCertificateOutlined />, label: 'Quyền truy cập AI' }] : []),
     ...(hasRole(['ADMIN', 'HR', 'MANAGER'])
       ? [
           {
