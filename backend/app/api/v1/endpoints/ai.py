@@ -1,8 +1,6 @@
 import asyncio
 import json
 import logging
-import json
-import logging
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,7 +17,7 @@ from app.services.ai_access import allowed_knowledge_roles, user_roles
 from app.core.authorization import capabilities, known_roles
 from app.models.knowledge import KnowledgeDocument, KnowledgeDocumentVersion, KnowledgeSection
 from app.services.ai_request_security import secured_operation
-from app.services.ai_suggestions import SUGGESTIONS, section_unavailability
+from app.services.ai_suggestions import SUGGESTIONS, section_unavailability, unique_visible_sections
 from app.services.ai_report_draft_service import suggestion_report_defaults
 from app.services.ai_knowledge_tool import AIKnowledgeTool
 from app.services.knowledge_retrieval import retrieve
@@ -79,8 +77,8 @@ async def get_suggestions(
             KnowledgeSection.section_code.in_([spec[2] for spec in citation_specs]),
             KnowledgeSection.is_answerable.is_(True),
         ))).mappings().all()
-    visible_sections = {row["section_code"]: row for row in rows}
-    missing_codes = [spec[2] for spec in citation_specs if spec[2] not in visible_sections]
+    visible_sections, ambiguous_codes = unique_visible_sections(rows)
+    missing_codes = [spec[2] for spec in citation_specs if spec[2] not in visible_sections and spec[2] not in ambiguous_codes]
     diagnostics = {}
     if missing_codes:
         audit_rows = (await db.execute(select(
@@ -100,7 +98,11 @@ async def get_suggestions(
     for suggestion_id, prompt, section_code in citation_specs:
         row = visible_sections.get(section_code)
         logging.getLogger(__name__).info(json.dumps({"event": "ai_suggestion_visibility", "suggestion_id": suggestion_id,
-                                                       "reason": "AVAILABLE" if row else diagnostics[section_code]}))
+                                                       "reason": "AMBIGUOUS_SOURCE" if section_code in ambiguous_codes else "AVAILABLE" if row else diagnostics[section_code]}))
+        if section_code in ambiguous_codes and suggestion_id in policy_ids:
+            # The policy is still an allowed question. Cite only after retrieval
+            # of the actual answer, not an arbitrary one of several documents.
+            suggestions.append(AISuggestion(suggestion_id=suggestion_id, prompt=prompt))
         if row:
             label = f"tham khảo mục {row['section_code']} {row['heading']}, trang {row['page_start']}"
             source = {
@@ -115,7 +117,7 @@ async def get_suggestions(
                 suggestions.append(AISuggestion(suggestion_id=suggestion_id, prompt=f"{prompt} ({label})", source=source))
     # Demo document codes are optional. Published, readable production sections can
     # support the same prompts without carrying seed-specific identifiers.
-    missing = {item[0] for item in citation_specs if item[0] not in references}
+    missing = {item[0] for item in citation_specs if item[0] not in references and item[2] not in ambiguous_codes}
     if missing:
         documents = await AIKnowledgeTool.documents(db, roles, today)
         reference_queries = {

@@ -59,3 +59,18 @@ def section_unavailability(rows: list[dict], allowed_roles: list[str], today) ->
     if any(row["document_status"] == "PUBLISHED" and row["version_status"] == "PUBLISHED" for row in rows):
         return "INSUFFICIENT_PERMISSION"
     return "NOT_PUBLISHED"
+
+
+def unique_visible_sections(rows: list[dict]) -> tuple[dict[str, dict], set[str]]:
+    """Avoid claiming an arbitrary document as a canonical policy reference."""
+    selected: dict[str, dict] = {}
+    ambiguous: set[str] = set()
+    for row in rows:
+        code = row["section_code"]
+        if code in selected:
+            ambiguous.add(code)
+        else:
+            selected[code] = row
+    for code in ambiguous:
+        selected.pop(code, None)
+    return selected, ambiguous
