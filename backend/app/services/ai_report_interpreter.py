@@ -71,7 +71,7 @@ def report_answers(message, today, params=None, missing=()):
 # Only date vocabulary crosses the provider boundary. The business kind and
 # permitted scopes are supplied separately from trusted report_catalog().
 _TEMPORAL_WORDS = frozenset({
-    "tu", "den", "toi", "ngay", "mung", "thang", "nam", "tuan", "quy",
+    "tu", "den", "toi", "ngay", "mung", "thang", "nam", "tuan", "quy", "ky",
     "thu", "hai", "ba", "tu", "bon", "nam", "sau", "bay", "chu", "nhat",
     "dau", "tien", "cuoi", "cung", "nay", "truoc", "sau", "lien", "ke",
     "hom", "qua", "mai", "mot", "kia", "cuoi", "dau", "theo",
@@ -89,7 +89,7 @@ def report_temporal_hint(message: str) -> str:
         r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/.]\d{1,2}(?:[/.]\d{4})?\b"
         r"|\b[a-z]+\b|\b\d{1,4}\b", normalize(message)
     )
-    markers = {"tu", "ngay", "mung", "thang", "tuan", "quy", "thu", "hom"}
+    markers = {"tu", "ngay", "mung", "thang", "tuan", "quy", "thu", "hom", "ky"}
     start = next((i for i, word in enumerate(tokens) if word in markers), None)
     if start is None:
         return ""
@@ -150,7 +150,8 @@ class GeminiReportInterpreter:
                     "using today in Asia/Ho_Chi_Minh. Payroll requires one full calendar month; "
                     "other current-month reports end at today. No SQL, prose or extra fields."
                 ), ReportPromptResult, timeout=5, max_tokens=256)
-            parsed = answers.model_dump(exclude_none=True)
+            parsed = {k: v for k, v in answers.model_dump(exclude_none=True).items()
+                      if k in {"start_date", "end_date"}}
             for key in ("start_date", "end_date"):
                 if key in parsed and date.fromisoformat(parsed[key]).isoformat() != parsed[key]:
                     record("interpret_report_filters", "OUTPUT_REJECTED", category="SCHEMA_VALIDATION_FAILED")

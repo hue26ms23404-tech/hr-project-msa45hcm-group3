@@ -557,3 +557,35 @@ async def test_headcount_suggestion_is_hidden_for_employee_and_visible_to_manage
         manager = await client.get("/ai/suggestions")
         assert manager.status_code == 200
         assert "headcount_report" in {item["suggestion_id"] for item in manager.json()}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path,payload", [
+    ("POST", "/leaves/requests/2/review", {"status": "REJECTED"}),
+    ("POST", "/leaves/requests/2/approve", {"status": "APPROVED"}),
+    ("POST", "/leaves/requests/2/reject", {"status": "REJECTED"}),
+    ("POST", "/attendance/fixes/2/approve", {"status": "APPROVED"}),
+    ("POST", "/attendance/fixes/2/reject", {"status": "REJECTED"}),
+])
+async def test_employee_cannot_enter_approval_endpoint_even_with_report_create(api_context, method, path, payload):
+    app, user, db = api_context
+    assert user.role_assignments[0].role.role_code == "EMPLOYEE"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.request(method, path, json=payload)
+    assert response.status_code == 403
+    db.execute.assert_not_awaited()
+    db.flush.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", [
+    "/leaves/requests?view=approvals",
+    "/attendance/fixes?view=approvals",
+])
+async def test_employee_cannot_view_approval_queue(api_context, url):
+    app, user, db = api_context
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(url)
+    assert response.status_code == 403
+    db.execute.assert_not_awaited()

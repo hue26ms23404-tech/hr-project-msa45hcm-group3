@@ -12,7 +12,14 @@ def require_known_role(roles: set[str]) -> None:
 
 
 def require_reviewer_role(roles: set[str]) -> None:
+    """Report creation permission; NOT permission to approve HR requests."""
     require_capability(roles, "report.create")
+
+
+def require_approver_role(roles: set[str]) -> None:
+    """Only a manager or higher can enter a business approval workflow."""
+    if not known_roles(roles) & {"MANAGER", "HR", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="PERMISSION_DENIED")
 
 
 def allowed_knowledge_roles(roles: set[str]) -> list[str]:

@@ -19,7 +19,7 @@ from app.schemas.attendance import (
     AttendanceFixCreate, AttendanceFixReview, AttendanceFixResponse
 )
 from app.services.attendance_service import AttendanceService, hash_token
-from app.services.ai_access import require_known_role, require_reviewer_role
+from app.services.ai_access import require_known_role, require_approver_role
 
 router = APIRouter()
 
@@ -282,7 +282,7 @@ async def list_attendance_fixes(
     if mine is True or view == "mine":
         stmt = stmt.where(AttendanceFix.employee_id == current_user.employee_id)
     elif view == "approvals":
-        require_reviewer_role(role_set)
+        require_approver_role(role_set)
         if status_filter not in (None, "PENDING"):
             raise HTTPException(status_code=422, detail="Approvals view only lists pending requests")
         direct_reports = (
@@ -332,6 +332,7 @@ async def approve_attendance_fix(
     current_user: UserAccount = Depends(get_current_user)
 ):
     """Direct Manager approves attendance fix and recalculates day"""
+    require_approver_role({ra.role.role_code for ra in current_user.role_assignments})
     is_admin = "ADMIN" in {ra.role.role_code for ra in current_user.role_assignments}
     review_in.status = "APPROVED"
     fix = await AttendanceService.review_fix_request(
@@ -358,7 +359,7 @@ async def reject_attendance_fix(
     current_user: UserAccount = Depends(get_current_user)
 ):
     """Direct Manager rejects attendance fix"""
-    require_reviewer_role({ra.role.role_code for ra in current_user.role_assignments})
+    require_approver_role({ra.role.role_code for ra in current_user.role_assignments})
 
     is_admin = "ADMIN" in {ra.role.role_code for ra in current_user.role_assignments}
     review_in.status = "REJECTED"

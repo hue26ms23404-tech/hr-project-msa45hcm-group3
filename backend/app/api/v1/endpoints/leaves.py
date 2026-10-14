@@ -16,7 +16,7 @@ from app.schemas.leave import (
     LeaveRequestCreate, LeaveRequestReview, LeaveRequestResponse
 )
 from app.services.leave_service import LeaveService
-from app.services.ai_access import require_known_role, require_reviewer_role
+from app.services.ai_access import require_known_role, require_approver_role
 
 router = APIRouter()
 
@@ -129,7 +129,7 @@ async def list_leave_requests(
     if mine is True or view == "mine":
         stmt = stmt.where(LeaveRequest.employee_id == current_user.employee_id)
     elif view == "approvals":
-        require_reviewer_role(role_set)
+        require_approver_role(role_set)
         if status_filter not in (None, "PENDING"):
             raise HTTPException(status_code=422, detail="Approvals view only lists pending requests")
         direct_reports = (
@@ -191,7 +191,7 @@ async def review_leave_request(
     """Direct Manager or Admin reviews (approve/reject) leave request"""
     user_roles = [ra.role.role_code for ra in current_user.role_assignments]
     is_admin = "ADMIN" in user_roles
-    require_reviewer_role(set(user_roles))
+    require_approver_role(set(user_roles))
 
     req = await LeaveService.review_leave_request(
         db, request_id, current_user.employee_id, review_in, is_admin=is_admin
@@ -220,7 +220,7 @@ async def approve_leave_request(
     """Direct Manager approves leave request"""
     user_roles = [ra.role.role_code for ra in current_user.role_assignments]
     is_admin = "ADMIN" in user_roles
-    require_reviewer_role(set(user_roles))
+    require_approver_role(set(user_roles))
 
     review_in.status = "APPROVED"
     req = await LeaveService.review_leave_request(
@@ -250,7 +250,7 @@ async def reject_leave_request(
     """Direct Manager rejects leave request"""
     user_roles = [ra.role.role_code for ra in current_user.role_assignments]
     is_admin = "ADMIN" in user_roles
-    require_reviewer_role(set(user_roles))
+    require_approver_role(set(user_roles))
 
     review_in.status = "REJECTED"
     req = await LeaveService.review_leave_request(
