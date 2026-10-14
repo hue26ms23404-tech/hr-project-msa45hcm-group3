@@ -47,6 +47,14 @@ async def interpret_report_prompt(message, today, user, current=None):
     return await _REPORT_INTERPRETER.interpret(message, today, user, current)
 
 
+def revised_report_params(current, answers):
+    """A stated scope replaces a selected employee, even if scope is unchanged."""
+    params = {**current, **answers}
+    if "employee_id" not in answers and ("scope" in answers or params.get("kind") not in {"ATTENDANCE", "LEAVE", "ATTENDANCE_FIX"}):
+        params.pop("employee_id", None)
+    return params
+
+
 class AIReportDraftService:
     @staticmethod
     def validate_access(user, params):
@@ -94,7 +102,7 @@ class AIReportDraftService:
         if inputs:
             AIDraftService._validate_command_and_params("DRAFT_REPORT", inputs)
             answers.update(inputs)
-        params = {**draft.typed_params, **answers}
+        params = revised_report_params(draft.typed_params, answers)
         AIDraftService._validate_command_and_params("DRAFT_REPORT", params)
         AIReportDraftService.validate_access(user, params)
         missing = [key for key in REQUIRED if key not in params]
@@ -121,7 +129,9 @@ class AIReportDraftService:
         if not answers:
             return AIChatResponse(reply="Bạn muốn đổi kỳ, loại báo cáo hay phạm vi? Ví dụ: đổi sang tháng trước.",
                                   message_code="REPORT_CHANGE_REQUIRED")
-        return await AIReportDraftService.start(db, user, "", today, {**current, **answers})
+        params = revised_report_params(current, answers)
+        AIReportDraftService.validate_access(user, params)
+        return await AIReportDraftService.start(db, user, "", today, params)
 
     @staticmethod
     async def finish_or_ask(db, user, draft):

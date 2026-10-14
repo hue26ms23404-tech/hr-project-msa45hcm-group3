@@ -39,7 +39,8 @@ def readiness() -> dict:
 
 
 def record(operation: str, outcome: str, elapsed_ms: int = 0, category: str | None = None) -> None:
-    logger.info(json.dumps({
+    emit = logger.warning if outcome in {"CALLED_FAILED", "OUTPUT_REJECTED"} else logger.info
+    emit(json.dumps({
         "event": "ai_provider", "request_id": current_request_id(), "operation": operation,
         "model": settings.GEMINI_MODEL_NAME, "elapsed_ms": elapsed_ms,
         "outcome": outcome, "category": category,

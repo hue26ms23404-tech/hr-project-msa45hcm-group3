@@ -92,13 +92,28 @@ async def test_ambiguous_plan_cannot_execute_any_handler(monkeypatch, plan, code
 
 
 @pytest.mark.asyncio
-async def test_provider_failure_does_not_fall_through_to_self_handler(monkeypatch):
-    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(side_effect=ProviderFailure("PROVIDER_TIMEOUT")))
+@pytest.mark.parametrize("category", ["PROVIDER_TIMEOUT", "QUOTA_EXCEEDED", "SCHEMA_VALIDATION_FAILED", "NETWORK_ERROR"])
+async def test_provider_failure_does_not_fall_through_to_self_handler(monkeypatch, category):
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(side_effect=ProviderFailure(category)))
     personal = AsyncMock(side_effect=AssertionError("No regex fallback may substitute self"))
     monkeypatch.setattr(AIEmployeeTool, "get_context", personal)
     response = await AIService.process_chat(AsyncMock(), 7, AIChatRequest(message="A còn bao nhiêu ngày phép?"), {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
-    assert response.status == "UNAVAILABLE" and response.message_code == "AI_UNAVAILABLE"
+    assert response.status == "UNAVAILABLE" and response.message_code == f"AI_INTENT_{category}"
+    assert "thử lại sau" in response.reply
+    assert not any(word in response.reply.lower() for word in ("gemini", "google", "hạn mức", "quota", "schema", category.lower()))
     personal.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target,reference", [("EMPLOYEE", None), ("SELF", "Le Thi Nhan Vien")])
+async def test_incomplete_or_conflicting_reference_is_clarification_not_provider_outage(monkeypatch, target, reference):
+    plan = ChatPlan(intent="LEAVE_BALANCE", target=target, employee_reference=reference)
+    assert plan.target == "UNSPECIFIED"
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(return_value=plan))
+    db = AsyncMock()
+    result = await AIService.process_chat(db, 7, AIChatRequest(message="so ngay phep con lai cua Le Thi Nhan Vien"), {"HR"}, 9, actor("HR"))
+    assert result.message_code == "TARGET_REQUIRED" and result.action is None
+    db.execute.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -127,3 +142,51 @@ async def test_plan_gets_complete_question_with_subject_but_no_contact_details(m
     assert "01-07-2026" in payload["message"]
     assert "an@example.test" not in payload["message"] and "0912345678" not in payload["message"]
     assert generate.call_args.args[3] is ChatPlan
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", [
+    "Tôi muốn biết lý do bị trừ ngày phép",
+    "Tại sao bị trừ phép bởi vì đi muộn?",
+    "Tôi cần biết ly do chính sách này thay đổi",
+])
+async def test_policy_question_is_not_truncated_as_a_draft_reason(monkeypatch, message):
+    from app.ai.parsing import intent
+    generate = AsyncMock(return_value=ChatPlan(intent="POLICY_QUERY", target="NONE"))
+    monkeypatch.setattr(intent, "generate_json", generate)
+    await intent.interpret_chat_request(message, date(2026, 10, 15))
+    assert json.loads(generate.call_args.args[1])["message"] == message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", [
+    "Nguyễn Văn An còn bao nhiêu ngày phép?",
+    "nguyen van an con bao nhieu ngay phep?",
+    "Tôi muốn xem số dư phép của Nguyễn Văn An",
+    "Show Nguyen Van An's remaining leave balance",
+    "Nguyễn Văn An còn bao nhiêu ngày phép, xem cho tôi",
+    "Show my employee's remaining leave balance",
+    "Show the leave balance of my colleague",
+])
+@pytest.mark.parametrize("role", ["EMPLOYEE", "HR"])
+@pytest.mark.parametrize("intent", ["LEAVE_BALANCE", "ATTENDANCE_SUMMARY", "REPORT_ATTENDANCE", "REPORT_LEAVE", "REPORT_ATTENDANCE_FIX", "REPORT_PAYSLIP", "REPORT_HEADCOUNT", "REPORT_PAYROLL", "ANALYZE_REPORT"])
+async def test_wrong_self_classification_never_reads_actor_data(monkeypatch, message, role, intent):
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(return_value=ChatPlan(intent=intent, target="SELF")))
+    dispatch = AsyncMock(side_effect=AssertionError("Never substitute self for a named/unclear subject"))
+    monkeypatch.setattr(AIService, "_dispatch_free_intent", dispatch)
+    db = AsyncMock()
+    result = await AIService.process_chat(db, 7, AIChatRequest(message=message), {role}, 9, actor(role))
+    assert result.status == "NEEDS_INPUT" and result.action is None
+    dispatch.assert_not_called()
+    db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["Tôi còn bao nhiêu ngày phép?", "Tôi là nhân viên muốn xem số dư phép của tôi", "Show my leave balance"])
+async def test_explicit_self_request_is_not_a_foreign_employee_lookup(monkeypatch, message):
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(return_value=ChatPlan(intent="LEAVE_BALANCE", target="SELF")))
+    dispatch = AsyncMock(return_value=AIChatResponse(reply="self result"))
+    monkeypatch.setattr(AIService, "_dispatch_free_intent", dispatch)
+    result = await AIService.process_chat(AsyncMock(), 7, AIChatRequest(message=message), {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
+    assert result.reply == "self result"
+    dispatch.assert_awaited_once()

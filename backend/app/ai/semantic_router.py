@@ -2,7 +2,7 @@
 from app.ai.parsing.intent import interpret_chat_request
 from app.ai.providers.gemini import ProviderFailure, record
 from app.schemas.ai import AIChatResponse
-from app.services.ai_employee_query import EmployeeQuery, answer_employee_query, clarify, mentions_employee
+from app.services.ai_employee_query import EmployeeQuery, answer_employee_query, clarify, explicitly_requests_self, mentions_employee
 from app.services.ai_service import AIService
 
 
@@ -12,8 +12,8 @@ async def process_semantic_chat(db, employee_id, req, roles, owner_id, actor, to
     except ProviderFailure as exc:
         record("interpret_chat_request", "FALLBACK_USED", category=exc.category)
         return AIChatResponse(
-            reply="Hiện chưa thể giải nghĩa yêu cầu an toàn. Vui lòng chọn một gợi ý có sẵn hoặc thử lại sau; chưa có thao tác nào được thực hiện.",
-            status="UNAVAILABLE", message_code="AI_UNAVAILABLE",
+            reply="Hiện tôi chưa xử lý được yêu cầu này. Bạn vui lòng thử lại sau hoặc chọn một gợi ý có sẵn. Tôi chưa thực hiện thao tác nào.",
+            status="UNAVAILABLE", message_code=f"AI_INTENT_{exc.category}",
         )
     if plan.multiple_actions:
         return clarify("MULTIPLE_ACTIONS_REQUIRED", "Yêu cầu có nhiều tác vụ hoặc nhiều nhân viên. Bạn muốn thực hiện việc nào trước? Vui lòng chọn một tác vụ và một đối tượng.")
@@ -24,6 +24,10 @@ async def process_semantic_chat(db, employee_id, req, roles, owner_id, actor, to
                                                  retrieval_queries=plan.retrieval_queries)
     if plan.target == "SELF" and mentions_employee(req.message):
         return clarify("TARGET_CONFLICT", "Yêu cầu có nhắc nhân viên khác. Vui lòng xác định rõ đối tượng; tôi chưa tra cứu dữ liệu bản thân.")
+    reads_records = plan.intent in {"LEAVE_BALANCE", "ATTENDANCE_SUMMARY", "ANALYZE_REPORT"} or plan.intent.startswith("REPORT_")
+    if (plan.target == "SELF" and reads_records
+            and not explicitly_requests_self(req.message)):
+        return clarify("TARGET_REQUIRED", "Bạn muốn tra cứu bản thân hay nhân viên nào? Vui lòng nêu rõ đối tượng; tôi chưa tra cứu dữ liệu.")
     if plan.target == "EMPLOYEE":
         if plan.intent not in {"LEAVE_BALANCE", "ATTENDANCE_SUMMARY", "REPORT_ATTENDANCE"}:
             return clarify("EMPLOYEE_ACTION_UNSUPPORTED", "Tôi hỗ trợ xem phép và báo cáo chấm công theo nhân viên trong phạm vi được cấp quyền. Tác vụ này chưa được hỗ trợ cho nhân viên khác.")

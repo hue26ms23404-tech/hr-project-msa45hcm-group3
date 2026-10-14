@@ -87,6 +87,9 @@ async def test_switching_from_leave_draft_to_report_requires_explicit_cancel(mon
     ("Vì tôi cần tìm hiểu chính sách nghỉ phép", None),
     ("Vì tôi cần tạo báo cáo chấm công", None),
     ("Cho tôi xem số dư phép còn lại", {"reason": "Việc gia đình"}),
+    ("Lý do: tôi cần chăm sóc nhân viên A", None),
+    ("Vì nhân viên mới cần tôi hỗ trợ", None),
+    ("Số dư phép của nhân viên EMP023", {"reason": "Việc gia đình"}),
 ])
 async def test_explicit_draft_reason_not_routed_to_balance_lookup(monkeypatch, message, inputs):
     from app.ai import orchestrator
@@ -110,3 +113,40 @@ async def test_explicit_draft_reason_not_routed_to_balance_lookup(monkeypatch, m
     continuation.assert_awaited_once()
     assert continuation.await_args.args[2:5] == (draft_id, message, 7)
     assert continuation.await_args.args[6] == inputs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["Tôi là nhân viên muốn xem số dư phép của tôi", "Xem số dư phép của bản thân"])
+async def test_legacy_routing_allows_self_role_description(monkeypatch, message):
+    from app.ai.orchestrator import ChatOrchestrator
+    from app.core.config import settings
+    from app.services.ai_service import AIService
+    monkeypatch.setattr(settings, "GEMINI_ENABLED", False)
+    lookup = AsyncMock(return_value={"remaining_leave_days": "8.00"})
+    monkeypatch.setattr(AIService, "get_employee_context", lookup)
+    monkeypatch.setattr(AIService, "_policy_sources", AsyncMock(return_value=[]))
+    result = await ChatOrchestrator.process_chat(None, 7, AIChatRequest(message=message), {"EMPLOYEE"}, 9)
+    assert "8.00" in result.reply
+    lookup.assert_awaited_once_with(None, 7)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["foreign_owner", "stale_revision", "invalid_field"])
+async def test_explicit_draft_input_keeps_owner_revision_and_field_checks(monkeypatch, failure):
+    from types import SimpleNamespace
+    from app.ai.orchestrator import ChatOrchestrator
+    from app.services.ai_draft_service import AIDraftService
+    draft = SimpleNamespace(draft_id="c" * 36, revision=3, command="DRAFT_LEAVE", missing_fields=["reason"], typed_params={})
+    get_draft = AsyncMock(return_value=draft)
+    if failure == "foreign_owner":
+        get_draft.side_effect = HTTPException(404, "AI_DRAFT_NOT_FOUND")
+    monkeypatch.setattr(AIDraftService, "get_draft", get_draft)
+    update = AsyncMock(side_effect=AssertionError("Invalid continuation cannot mutate a draft"))
+    monkeypatch.setattr(AIDraftService, "update_draft", update)
+    with pytest.raises(HTTPException) as rejected:
+        await ChatOrchestrator.process_chat(None, 7, AIChatRequest(message="Số dư phép của EMP023",
+            draft_id=draft.draft_id, draft_revision=2 if failure == "stale_revision" else 3,
+            inputs={"employee_id": 23}), {"EMPLOYEE"}, 9)
+    assert rejected.value.status_code == {"foreign_owner": 404, "stale_revision": 409, "invalid_field": 422}[failure]
+    get_draft.assert_awaited_once_with(None, draft.draft_id, 9)
+    update.assert_not_called()

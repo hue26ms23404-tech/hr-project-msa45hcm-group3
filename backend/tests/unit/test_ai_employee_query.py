@@ -1,4 +1,6 @@
 import json
+import re
+import sqlite3
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -8,6 +10,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import sqlite
 
 from app.core.authorization import ai_scope_context
 from app.schemas.ai import AIChatRequest, AIChatResponse
@@ -21,6 +24,29 @@ from app.services.report_service import ReportService
 
 TODAY = date(2026, 10, 14)
 TARGET = SimpleNamespace(employee_id=23, employee_code="EMP023", full_name="Nguyễn Văn An")
+
+
+@pytest.mark.parametrize("message", [
+    "Tôi là nhân viên muốn xem số dư phép của tôi",
+    "Tôi là một nhân viên cần xem số dư phép của mình",
+    "Mình là nhân viên trong công ty, xem phép của mình",
+    "Số dư phép của bản thân",
+    "Nhân viên như tôi muốn xem số dư phép của mình",
+    "Là nhân viên mới, tôi muốn xem số dư phép của tôi",
+    "Nhân viên có thể xem số dư phép của mình không?",
+])
+def test_self_role_description_is_not_an_employee_reference(message):
+    assert not module.mentions_employee(message)
+
+
+@pytest.mark.parametrize("message", [
+    "Tôi là nhân viên muốn xem số dư phép của nhân viên A",
+    "Tôi là nhân viên muốn xem phép của EMP023",
+    "xem số dư phép của Nguyễn Văn An",
+    "xem dữ liệu của người khác",
+])
+def test_role_description_does_not_hide_a_separate_employee_target(message):
+    assert module.mentions_employee(message)
 
 
 def actor(role="HR"):
@@ -101,7 +127,62 @@ async def test_unknown_or_duplicate_target_asks_without_reading_balance(monkeypa
     db.execute.return_value = SimpleNamespace(all=lambda: employees)
     result = await module.answer_employee_query(db, actor(), AIChatRequest(message="Số dư phép của EMP023"), TODAY)
     assert result.message_code == code and result.action is None
-    assert db.execute.await_count == 1
+    assert db.execute.await_count == (2 if not employees else 1)
+
+
+@pytest.fixture
+def employee_query_db():
+    # Execute the SQL predicate with PostgreSQL string-function equivalents;
+    # this validates actual name matching, beyond mocking a list of rows.
+    connection = sqlite3.connect(":memory:")
+    connection.create_function("translate", 3, lambda value, source, target: value.translate(str.maketrans(source, target)))
+    connection.create_function("regexp_replace", 4, lambda value, pattern, replacement, flags: re.sub(pattern, replacement, value))
+    connection.create_function("concat", -1, lambda *values: "".join(values))
+    connection.create_function("strpos", 2, lambda value, needle: value.find(needle) + 1)
+    connection.create_function("lower", 1, str.lower)
+    connection.execute("CREATE TABLE hr_employees (employee_id INTEGER, employee_code TEXT, full_name TEXT, manager_employee_id INTEGER)")
+    connection.executemany("INSERT INTO hr_employees VALUES (?, ?, ?, ?)", [
+        (23, "EMP023", "Lê Thị Nhân Viên", 7),
+        (24, "EMP024", "Lê Thị Nhân Viên", 99),
+        (25, "EMP025", "Lê Thị An", 7),
+    ])
+
+    async def execute(statement):
+        compiled = statement.compile(dialect=sqlite.dialect())
+        records = connection.execute(str(compiled), tuple(compiled.params[key] for key in compiled.positiontup)).fetchall()
+        return SimpleNamespace(all=lambda: [SimpleNamespace(employee_id=row[0], employee_code=row[1], full_name=row[2]) for row in records])
+
+    yield SimpleNamespace(execute=execute)
+    connection.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", [
+    "so ngay phep con lai cua Le Thi Nhan Vien",
+    "so ngay phep con lai cua le thi nhan vien",
+    "Số ngày phép còn lại của Lê   Thị Nhân Viên?",
+])
+async def test_full_name_in_original_request_recovers_shortened_model_reference(employee_query_db, message):
+    rows = await module.resolve_employee(employee_query_db, actor("MANAGER"), "DIRECT_REPORTS", "le thi", message)
+    assert [row.employee_id for row in rows] == [23]
+
+
+@pytest.mark.asyncio
+async def test_partial_name_returns_only_scoped_candidates(employee_query_db):
+    rows = await module.resolve_employee(employee_query_db, actor("MANAGER"), "DIRECT_REPORTS", "le thi", partial=True)
+    assert {row.employee_id for row in rows} == {23, 25}
+    assert 24 not in {row.employee_id for row in rows}
+
+
+@pytest.mark.asyncio
+async def test_partial_name_requires_confirmation_before_any_balance_lookup():
+    db = AsyncMock()
+    db.execute.side_effect = [SimpleNamespace(all=lambda: []), SimpleNamespace(all=lambda: [TARGET])]
+    response = await module.answer_employee_query(db, actor(), AIChatRequest(message="Xem số dư phép của Nguyễn An"), TODAY,
+        interpretation=EmployeeQuery(intent="LEAVE_BALANCE", employee_reference="Nguyễn An"))
+    assert response.message_code == "EMPLOYEE_CONFIRMATION_REQUIRED"
+    assert db.execute.await_count == 2
+    assert all("hr_employee_leave_balances" not in sql(call.args[0]) for call in db.execute.call_args_list)
 
 
 @pytest.mark.asyncio

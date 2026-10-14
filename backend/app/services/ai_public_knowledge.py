@@ -48,7 +48,6 @@ def public_question(message):
     value = re.sub(r"(?<!\w)(?:\+?84|0)(?:[ .-]?\d){9}(?!\d)", "[phone]", value)
     value = re.sub(r"\b(?:EMP|E)\d+\b", "[employee]", value, flags=re.IGNORECASE)
     value = re.sub(r"\b(?:Nguyễn|Trần|Lê|Phạm|Hoàng|Huỳnh|Phan|Vũ|Võ|Đặng|Bùi|Đỗ|Hồ|Ngô|Dương|Đinh)\s+[A-ZÀ-ỴĐ][a-zà-ỹđ]+(?:\s+[A-ZÀ-ỴĐ][a-zà-ỹđ]+){0,2}\b", "[person]", value)
-    value = re.split(r"\b(?:lý do|ly do|bởi vì|boi vi)\s*[:：]?", value, maxsplit=1, flags=re.IGNORECASE)[0]
     return value[:2000]
 
 
@@ -114,9 +113,7 @@ async def answer_public_question(question, today):
     except ProviderFailure as exc:
         record("public_policy_search", "FALLBACK_USED", category=exc.category)
         return AIChatResponse(
-            reply=("Chưa có nguồn nội bộ đủ căn cứ. Tra cứu nguồn công khai hiện đã hết hạn mức Gemini/Google Search. Vui lòng thử lại khi hạn mức được khôi phục hoặc liên hệ HR."
-                   if exc.category == "QUOTA_EXCEEDED" else
-                   "Chưa có nguồn nội bộ đủ căn cứ và hiện chưa thể tra cứu nguồn công khai. Vui lòng thử lại sau hoặc liên hệ HR."),
+            reply="Hiện chưa thể hoàn tất tra cứu để trả lời câu hỏi này. Bạn vui lòng thử lại sau hoặc liên hệ HR để được hỗ trợ.",
             status="UNAVAILABLE", message_code=f"PUBLIC_SEARCH_{exc.category}",
         )
 

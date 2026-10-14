@@ -14,6 +14,13 @@ class Answer(BaseModel):
     ok: bool
 
 
+def test_provider_failure_diagnostic_is_visible_at_warning_level(caplog):
+    caplog.set_level(logging.WARNING)
+    gemini.record("interpret_chat_request", "CALLED_FAILED", category="PROVIDER_TIMEOUT")
+    assert "PROVIDER_TIMEOUT" in caplog.text
+    assert caplog.records[-1].levelno == logging.WARNING
+
+
 class FakeAsyncClient:
     def __init__(self, response):
         self.models = SimpleNamespace(generate_content=AsyncMock(return_value=response))

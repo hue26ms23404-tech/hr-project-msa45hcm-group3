@@ -254,7 +254,13 @@ async def test_payroll_calculation_and_export():
         lines = lines_resp.json()
         assert len(lines) >= 3
 
-        # Export Excel spreadsheet
+        # Unreleased payroll must stay unavailable even to an export request.
+        unreleased = await ac.get(f"/api/v1/payroll/periods/{period_id}/export", headers=headers)
+        assert unreleased.status_code == 404
+        closed = await ac.post(f"/api/v1/payroll/periods/{period_id}/close", headers=headers)
+        assert closed.status_code == 200 and closed.json()["status"] == "CLOSED"
+
+        # Export the released Excel spreadsheet.
         export_resp = await ac.get(f"/api/v1/payroll/periods/{period_id}/export", headers=headers)
         assert export_resp.status_code == 200
         assert export_resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

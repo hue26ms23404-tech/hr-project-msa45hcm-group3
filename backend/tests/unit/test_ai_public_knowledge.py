@@ -49,11 +49,14 @@ async def test_no_answer_from_unofficial_unsupported_or_truncated_response(monke
 
 
 @pytest.mark.asyncio
-async def test_search_quota_failure_is_visible_and_has_no_irrelevant_sources(monkeypatch):
+@pytest.mark.parametrize("category", ["QUOTA_EXCEEDED", "PROVIDER_TIMEOUT", "NETWORK_ERROR", "SCHEMA_VALIDATION_FAILED"])
+async def test_search_failure_has_friendly_reply_and_no_irrelevant_sources(monkeypatch, category):
     from app.ai.providers.gemini import ProviderFailure
-    monkeypatch.setattr(module, "generate_search_answer", AsyncMock(side_effect=ProviderFailure("QUOTA_EXCEEDED")))
+    monkeypatch.setattr(module, "generate_search_answer", AsyncMock(side_effect=ProviderFailure(category)))
     answer = await module.answer_public_question("chinh sach thai san", TODAY)
-    assert answer.status == "UNAVAILABLE" and answer.message_code == "PUBLIC_SEARCH_QUOTA_EXCEEDED"
+    assert answer.status == "UNAVAILABLE" and answer.message_code == f"PUBLIC_SEARCH_{category}"
+    assert "thử lại sau" in answer.reply
+    assert not any(word in answer.reply.lower() for word in ("gemini", "google", "hạn mức", "quota", "schema", category.lower()))
     assert not answer.sources and not answer.external_sources
 
 
@@ -88,6 +91,11 @@ async def test_google_redirect_only_accepts_official_destination_without_fetchin
 def test_public_query_preserves_legal_effective_date_but_removes_phone():
     question = module.public_question("Quy định từ 01-07-2026, số điện thoại 0912345678")
     assert "01-07-2026" in question and "0912345678" not in question
+
+
+def test_public_policy_question_preserves_reason_topic():
+    question = "Tôi muốn biết lý do bị trừ ngày phép"
+    assert module.public_question(question) == question
 
 
 @pytest.mark.asyncio

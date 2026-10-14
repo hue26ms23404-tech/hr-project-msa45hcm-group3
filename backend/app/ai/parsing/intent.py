@@ -19,9 +19,12 @@ class ChatPlan(AIIntentResult):
     @model_validator(mode="after")
     def consistent_target(self):
         if self.target == "EMPLOYEE" and not self.employee_reference:
-            raise ValueError("EMPLOYEE_REFERENCE_REQUIRED")
-        if self.target != "EMPLOYEE" and self.employee_reference is not None:
-            raise ValueError("EMPLOYEE_REFERENCE_UNEXPECTED")
+            self.target = "UNSPECIFIED"
+        elif self.target != "EMPLOYEE" and self.employee_reference is not None:
+            # A contradictory entity hint is a clarification, not an outage or
+            # permission to substitute the authenticated user's records.
+            self.target = "UNSPECIFIED"
+            self.employee_reference = None
         return self
 
 
@@ -30,7 +33,6 @@ async def interpret_chat_request(message, today):
     # retrieved company passages, conversation history, or role-derived identity.
     safe_message = re.sub(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "[email]", message)
     safe_message = re.sub(r"(?<!\w)(?:\+?84|0)(?:[ .-]?\d){9}(?!\d)", "[phone]", safe_message)
-    safe_message = re.split(r"\b(?:lý do|ly do|bởi vì|boi vi)\s*[:：]?", safe_message, maxsplit=1, flags=re.IGNORECASE)[0]
     return await generate_json(
         "interpret_chat_request",
         json.dumps({"message": safe_message[:2000], "today": today.isoformat()}, ensure_ascii=False),
@@ -43,7 +45,9 @@ async def interpret_chat_request(message, today):
         "policy/knowledge questions; UNSPECIFIED when the subject is unclear. "
         "CRITICAL: 'xem ngay phep con lai cua nhan vien A' concerns EMPLOYEE A, never SELF. "
         "A name at the beginning/end of a sentence still identifies EMPLOYEE. Copy the reference "
-        "verbatim from message, omitting words like nhan vien/anh/chi. Do not "
+        "verbatim from message. Keep the COMPLETE name, including words that also look like "
+        "job titles or generic nouns. Strip an honorific only outside the person's name; "
+        "never shorten a name or remove its final words. Casing does not change the name. Do not "
         "invent a name or employee ID. A request for 'a specific employee' without name/code is "
         "UNSPECIFIED. Never substitute the current user if a target cannot be resolved. "
         "Use POLICY_QUERY for explanations, regulations, legal HR questions or how-to questions, "

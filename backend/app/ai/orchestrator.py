@@ -54,6 +54,7 @@ class ChatOrchestrator:
             from app.ai.semantic_router import process_semantic_chat
             return await process_semantic_chat(db, employee_id, req, roles, owner_user_account_id, authenticated_user, today)
         text = normalize(req.message)
+        explicit_draft_reply = bool(req.draft_id and (req.inputs or draft_reason_match(req.message) is not None))
         policy_question = policy_question or any(text == normalize(SUGGESTIONS[key].prompt) for key in policy_ids)
         policy_question = policy_question or any(term in text for term in ("chinh sach", "quy dinh", "noi quy", "quy trinh", "thu tuc", "huong dan", "dieu kien")) or bool(re.search(r"\b(?:cach|lam the nao|lam sao)\b.{0,40}\b(?:nghi|phep|cham cong|giai trinh)\b", text))
         knowledge_management = any(term in text for term in ("quan ly tai lieu", "quan tri tai lieu"))
@@ -66,9 +67,7 @@ class ChatOrchestrator:
 
         # Personal lookup/drafting has no target parameter: never silently answer
         # with the actor's records when the request names somebody else.
-        foreign_target = bool(re.search(r"\b(?:e\d+|employee[_ ]?id|nhan vien\s+(?:id|ma|\d)|cua (?:nhan vien|nguoi khac|anh|chi|ban)\b)", text))
-        named_owner = re.search(r"\b(?:phep|nghi|cong|luong) cua (?!toi\b|minh\b|ban than\b|nhom\b|toan cong ty\b)(\w+)", text)
-        if foreign_target or named_owner or mentions_employee(req.message):
+        if not explicit_draft_reply and mentions_employee(req.message):
             if not req.draft_id and not req.report_run_id:
                 return await answer_employee_query(db, authenticated_user, req, today)
             return AIChatResponse(reply="Bạn không có quyền thực hiện yêu cầu này hoặc truy cập dữ liệu được yêu cầu. Vui lòng chọn chức năng trong phạm vi quyền của bạn.", answer_mode="OUT_OF_SCOPE")
@@ -111,7 +110,6 @@ class ChatOrchestrator:
 
         # A new question while collecting a draft is NOT a value for the
         # remaining form field (especially the free-text "reason" field).
-        explicit_draft_reply = bool(req.inputs) or draft_reason_match(req.message) is not None
         if (req.draft_id and not explicit_draft_reply and owner_user_account_id is not None):
             interruption = policy_question and not knowledge_management and not report_request
             competing_action = (
