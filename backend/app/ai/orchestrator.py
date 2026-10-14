@@ -18,10 +18,11 @@ from app.services.ai_access import require_known_role, require_reviewer_role
 from app.services.ai_draft_service import AIDraftService
 from app.services.ai_report_draft_service import AIReportDraftService, report_answers, suggestion_report_defaults
 from app.services import ai_service as ai_service_module
-from app.services.ai_service import AIService, is_leave_balance_query, requested_date
+from app.services.ai_service import AIService, draft_reason_match, is_leave_balance_query, requested_date
 from app.services.ai_suggestions import SUGGESTIONS, resolve_suggestion
 from app.services.knowledge_retrieval import normalize
 from app.services.report_run_service import ReportRunService
+from app.services.ai_employee_query import answer_employee_query, mentions_employee
 
 
 class ChatOrchestrator:
@@ -47,6 +48,11 @@ class ChatOrchestrator:
             if req.inputs and req.suggestion_id not in {"draft_leave", "attendance_fix", "my_attendance_report", "my_payslip", "team_attendance_report", "team_leave_report", "headcount_report", "company_attendance_report", "payroll_summary"}:
                 raise HTTPException(422, "AI_DRAFT_FIELD_INVALID")
             req = req.model_copy(update={"message": definition.prompt, "suggestion_id": None})
+        today = ai_service_module.business_today()
+        if (settings.GEMINI_ENABLED and settings.GEMINI_SEMANTIC_ENABLED and not from_suggestion
+                and not req.draft_id and not req.report_run_id):
+            from app.ai.semantic_router import process_semantic_chat
+            return await process_semantic_chat(db, employee_id, req, roles, owner_user_account_id, authenticated_user, today)
         text = normalize(req.message)
         policy_question = policy_question or any(text == normalize(SUGGESTIONS[key].prompt) for key in policy_ids)
         policy_question = policy_question or any(term in text for term in ("chinh sach", "quy dinh", "noi quy", "quy trinh", "thu tuc", "huong dan", "dieu kien")) or bool(re.search(r"\b(?:cach|lam the nao|lam sao)\b.{0,40}\b(?:nghi|phep|cham cong|giai trinh)\b", text))
@@ -55,7 +61,6 @@ class ChatOrchestrator:
         report_request = explicit_report or (not policy_question and any(term in text for term in ("thong ke", "phan tich", "bieu do")))
         if report_request or req.report_run_id:
             require_reviewer_role(roles)
-        today = ai_service_module.business_today()
         if policy_question and not knowledge_management and not report_request and not req.draft_id and not req.report_run_id:
             return await AIService._answer_knowledge(db, roles, today, req, policy_question=True)
 
@@ -63,8 +68,22 @@ class ChatOrchestrator:
         # with the actor's records when the request names somebody else.
         foreign_target = bool(re.search(r"\b(?:e\d+|employee[_ ]?id|nhan vien\s+(?:id|ma|\d)|cua (?:nhan vien|nguoi khac|anh|chi|ban)\b)", text))
         named_owner = re.search(r"\b(?:phep|nghi|cong|luong) cua (?!toi\b|minh\b|ban than\b|nhom\b|toan cong ty\b)(\w+)", text)
-        if foreign_target or named_owner:
+        if foreign_target or named_owner or mentions_employee(req.message):
+            if not req.draft_id and not req.report_run_id:
+                return await answer_employee_query(db, authenticated_user, req, today)
             return AIChatResponse(reply="Bạn không có quyền thực hiện yêu cầu này hoặc truy cập dữ liệu được yêu cầu. Vui lòng chọn chức năng trong phạm vi quyền của bạn.", answer_mode="OUT_OF_SCOPE")
+        # Resolve name-first requests before a balance/report keyword can turn
+        # them into the actor's own records or an unfiltered company report.
+        if (settings.GEMINI_ENABLED and authenticated_user is not None and not from_suggestion
+                and not req.draft_id and not req.report_run_id):
+            employee_answer = await answer_employee_query(db, authenticated_user, req, today, required=False)
+            if employee_answer is not None:
+                return employee_answer
+        if (not from_suggestion and not req.draft_id and not req.report_run_id and not policy_question
+                and is_leave_balance_query(text)
+                and not re.search(r"\b(?:cua toi|cua minh|ban than|toi con|minh con|toan cong ty|nhom|nhan vien truc tiep)\b", text)):
+            return AIChatResponse(reply="Vui lòng nêu rõ bản thân, mã nhân viên hoặc phạm vi nhóm/công ty cần xem. Tôi chưa tra cứu dữ liệu khi chưa rõ đối tượng.",
+                                  status="NEEDS_INPUT", message_code="TARGET_REQUIRED")
         if employee_id is None and is_leave_balance_query(text):
             raise HTTPException(status_code=403, detail="PERMISSION_DENIED")
         if employee_id is None and not policy_question and not report_request and not req.draft_id and any(term in text for term in ("cua toi", "xin nghi", "giai trinh", "so du phep")):
@@ -92,7 +111,7 @@ class ChatOrchestrator:
 
         # A new question while collecting a draft is NOT a value for the
         # remaining form field (especially the free-text "reason" field).
-        explicit_draft_reply = bool(req.inputs) or text.startswith(("ly do:", "vi:", "boi vi:"))
+        explicit_draft_reply = bool(req.inputs) or draft_reason_match(req.message) is not None
         if (req.draft_id and not explicit_draft_reply and owner_user_account_id is not None):
             interruption = policy_question and not knowledge_management and not report_request
             competing_action = (
@@ -165,6 +184,9 @@ class ChatOrchestrator:
 
         if report_request:
             if authenticated_user is not None:
+                if not from_suggestion and not re.search(r"\b(?:cua toi|cua minh|ban than|toan cong ty|nhom|nhan vien truc tiep)\b", text):
+                    return AIChatResponse(reply="Vui lòng nêu rõ nhân viên hoặc phạm vi bản thân/nhóm/công ty cần báo cáo.",
+                                          status="NEEDS_INPUT", message_code="TARGET_REQUIRED")
                 initial = {}
                 if from_suggestion:
                     initial = suggestion_report_defaults(authenticated_user, req.message, today)
@@ -176,6 +198,9 @@ class ChatOrchestrator:
             report_kind = "PAYROLL_SUMMARY" if "tong hop luong" in text else "MY_PAYSLIP" if "phieu luong" in text else "HEADCOUNT" if "headcount" in text or "nhan su theo phong ban" in text else "APPROVAL_QUEUE" if "cho duyet" in text else "ATTENDANCE_FIX" if "giai trinh" in text else "LEAVE" if "phep" in text or "nghi" in text else "ATTENDANCE"
             if report_kind == "PAYROLL_SUMMARY" and "report.read_company" not in actor_caps or report_kind in {"HEADCOUNT", "APPROVAL_QUEUE"} and "report.read_direct_reports" not in actor_caps:
                 return AIChatResponse(reply="Bạn không có quyền thực hiện yêu cầu này hoặc truy cập dữ liệu được yêu cầu. Vui lòng chọn chức năng trong phạm vi quyền của bạn.", answer_mode="OUT_OF_SCOPE")
+            if not from_suggestion and not re.search(r"\b(?:cua toi|cua minh|ban than|toan cong ty|nhom|nhan vien truc tiep)\b", text):
+                return AIChatResponse(reply="Vui lòng nêu rõ nhân viên hoặc phạm vi bản thân/nhóm/công ty cần báo cáo.",
+                                      status="NEEDS_INPUT", message_code="TARGET_REQUIRED")
             payroll = report_kind in {"MY_PAYSLIP", "PAYROLL_SUMMARY"}
             end = today.replace(day=1) - timedelta(days=1) if "thang truoc" in text else today
             start = end.replace(day=1)

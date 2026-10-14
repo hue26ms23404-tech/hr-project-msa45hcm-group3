@@ -18,6 +18,13 @@ from app.services.ai_access import user_roles, require_reviewer_role
 
 class ReportRunService:
     @staticmethod
+    def request_filters(req):
+        filters = {"start_date": req.start_date.isoformat(), "end_date": req.end_date.isoformat(), "department_id": req.department_id}
+        if req.employee_id is not None:
+            filters["employee_id"] = req.employee_id
+        return filters
+
+    @staticmethod
     async def _save_state(user, req, run_id, scope, employee_ids, status, **values):
         """Persist lifecycle independently from a failed business-query session."""
         async with asyncio.timeout(10):
@@ -28,7 +35,7 @@ class ReportRunService:
                     raise HTTPException(409, "REPORT_ALREADY_EXISTS")
                 if run is None:
                     now = datetime.now(timezone.utc)
-                    run = ReportRun(run_id=run_id, owner_user_account_id=user.user_account_id, kind=req.kind, scope=scope, filters={"start_date": req.start_date.isoformat(), "end_date": req.end_date.isoformat(), "department_id": req.department_id}, template_version=f"{req.kind.lower()}_v1", scope_snapshot=list(employee_ids), as_of=now, expires_at=now + timedelta(hours=1))
+                    run = ReportRun(run_id=run_id, owner_user_account_id=user.user_account_id, kind=req.kind, scope=scope, filters=ReportRunService.request_filters(req), template_version=f"{req.kind.lower()}_v1", scope_snapshot=list(employee_ids), as_of=now, expires_at=now + timedelta(hours=1))
                     state_db.add(run)
                 run.status = status
                 for key, value in values.items():
@@ -65,11 +72,7 @@ class ReportRunService:
                         # Reuse only the exact original operation; never return
                         # an old report for a modified draft or a revoked scope.
                         filters = existing.filters or {}
-                        expected = {
-                            "start_date": req.start_date.isoformat(),
-                            "end_date": req.end_date.isoformat(),
-                            "department_id": req.department_id,
-                        }
+                        expected = ReportRunService.request_filters(req)
                         if existing.kind != req.kind or filters != expected or existing.scope != scope:
                             raise HTTPException(409, "REPORT_ALREADY_EXISTS")
                         from app.services.report_access import authorized_run
@@ -83,7 +86,8 @@ class ReportRunService:
         workbook_key = snapshot_key = None
         try:
             async with asyncio.timeout(30):
-                scope, employee_ids = await ReportService.visible_employee_ids(db, user, req.kind, scope, req.department_id, req.start_date, req.end_date)
+                target_filter = {"employee_id": req.employee_id} if req.employee_id is not None else {}
+                scope, employee_ids = await ReportService.visible_employee_ids(db, user, req.kind, scope, req.department_id, req.start_date, req.end_date, **target_filter)
                 await ReportRunService._save_state(user, req, run_id, scope, employee_ids, "GENERATING")
                 started = True
                 report = await ReportService.generate(db, user, req.kind, req.start_date, req.end_date, req.department_id, scope, source_employee_ids=employee_ids)

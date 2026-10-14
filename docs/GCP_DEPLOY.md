@@ -33,7 +33,12 @@ FETCHSOURCE commit and the Cloud Run revision's container image digest. Inspect
 environment variable names and nonsecret values, Secret Manager references,
 egress/VPC settings, and database connectivity without printing secret values.
 Enabling Gemini can incur usage; do it explicitly in staging. Retain the previous
-deployable revision for rollback. This AI refactor adds no database migration.
+deployable revision for rollback. Before moving traffic, the migration job must
+apply revision `c4d5e6f70819` (via `alembic upgrade head`), which creates
+`hr_ai_role_scope_policies`. Chat, suggestions and report analysis query this
+table even with Gemini disabled; a missing table causes 503 responses. An empty
+table uses default policies, so existing deployments do not need demo data reseeded.
+Verify migration completion against the target database before moving traffic.
 
 From `backend/` with the revision's effective configuration:
 

@@ -2,6 +2,10 @@
 
 ## Sử dụng
 
+Luồng Gemini ngữ nghĩa dùng API key/model hiện có (`GEMINI_ENABLED=true`); `GEMINI_SEMANTIC_ENABLED` mặc định bật. Câu tự do mới được giải nghĩa **trước** luật chọn handler tại `app/ai/parsing/intent.py`. JSON `ChatPlan` xác định intent, target, employee_reference nguyên văn, multiple_actions và truy vấn RAG; không gửi lịch sử/hồ sơ DB. Backend tìm nhân viên và kiểm quyền từ JWT; không chuyển yêu cầu về người khác thành dữ liệu người hỏi. Người dùng không đủ quyền nhận cảnh báo cùng nguồn phân quyền đã công bố nếu có. Provider lỗi trả trạng thái UNAVAILABLE, không tự chọn handler cá nhân. Gợi ý, nháp/run nhiều lượt vẫn dùng contract owner/revision hiện hữu; nhiều tác vụ được hỏi lại.
+
+Quota do provider áp theo project; ứng dụng không tự retry. Hỏi chính sách có thể có ba bước: giải nghĩa, trả lời từ nguồn nội bộ, rồi Google Search khi không đủ bằng chứng. Mỗi bước có timeout/token limit, log operation/model/mã kết quả không ghi prompt hay key. Nguồn công khai chỉ nhận đoạn có grounding và link cơ quan nhà nước, hiển thị riêng với PDF công ty; không suy đoán chính sách riêng. Search có quota riêng và có thể lỗi dù sinh JSON hoạt động. Test unit mock provider; phải thử Search thật riêng khi triển khai.
+
 
 
 - Nháp follow-up bắt buộc có draft_id/draft_revision; có thể gửi inputs có kiểu mà không thêm message giả. Báo cáo tự do hỏi loại/kỳ/phạm vi theo quyền qua DRAFT_REPORT, sau đó tạo run thật. Gợi ý mẫu giữ mặc định minh bạch.
@@ -11,8 +15,8 @@
 - Ví dụ: `Tôi còn bao nhiêu ngày phép?`, `Các ngày thiếu công của tôi?`, `Xin nghỉ sáng mai`, `Xin nghỉ Thứ Sáu tuần này`, `Quên check-out hôm qua lúc 17h`.
 - Quick Action Cards truyền nháp vào form nghỉ phép/giải trình. Người dùng kiểm tra và gửi bằng API nghiệp vụ hiện có. Không có thao tác ghi dữ liệu từ LLM. Không tự đổi phép năm sang không lương; không đoán ngày hoặc giờ chấm công khi thiếu thông tin.
 - Nếu thiếu ngày/buổi/loại/lý do/giờ, backend giữ draft owner-bound trong tối đa 15 phút và chatbot hỏi từng trường còn thiếu. Request follow-up chỉ gửi opaque `draft_id`; server đọc owner từ JWT, khóa row và chỉ cập nhật key theo command allowlist. Có thể hủy bằng “hủy bản nháp”. Draft hết hạn trả mã ổn định `AI_DRAFT_EXPIRED`; draft của user khác trả 404 chung.
-- Câu hỏi nội quy truy xuất các đoạn trong tài liệu đã công bố bằng từ khóa tiếng Việt có/không dấu. Gemini gọi async, timeout 5 giây. Chỉ chấp nhận đoạn trích nguyên văn từ nguồn đã truy xuất; lỗi, timeout hoặc nội dung không khớp nguồn dùng rule fallback. Không có nguồn phù hợp thì thông báo chưa đủ kiến thức.
-- Khi không có fallback handler hoặc citation source phù hợp, câu hỏi có dấu hiệu thuộc HR mới dùng Gemini để phân loại vào enum intent đóng; output không chứa params, quyền hay lệnh DB. Backend tự trích trường từ yêu cầu gốc và gọi handler có authorization. Prompt classifier không gửi history; làm mờ email/số điện thoại/ngày/giờ/số ID/đoạn lý do. Khi key/provider không khả dụng, API trả `503 AI_UNAVAILABLE` để frontend hiển thị mẫu cố định. Câu hỏi ngoài HR không gọi Gemini.
+- Câu hỏi nội quy dùng tối đa ba truy vấn ngữ nghĩa do Gemini diễn đạt lại trên tài liệu PUBLISHED đã lọc quyền, kết hợp câu gốc. Câu trả lời nội bộ vẫn phải có evidence nguyên văn và số liệu được kiểm tra. Khi không có/không đủ bằng chứng, `GEMINI_PUBLIC_SEARCH_ENABLED=true` cho phép tra luật/chính sách lao động công khai bằng Google Search; không gắn PDF không liên quan vào câu trả lời thiếu căn cứ.
+- Gemini phân loại câu tự do vào enum đóng và target trước handler, không dựa cổng từ khóa HR để quyết định có gọi mô hình. Backend vẫn quyết định identity, quyền và thao tác. Thông tin liên hệ/lý do được che trước giải nghĩa; tên/mã người được hỏi được giữ để resolve ở backend. Lỗi giải nghĩa trả status UNAVAILABLE, code AI_UNAVAILABLE và action null. Ngoài HR không chạy tool.
 - Nguồn tham khảo hiển thị ngay dưới câu trả lời. Mở nguồn gọi lại API kiểm tra quyền và trạng thái tài liệu hiện tại.
 - `GET /api/v1/ai/suggestions` trả gợi ý theo role xác thực; câu hỏi chính sách chỉ có khi PDF tương ứng đang được công bố, còn hiệu lực và user có quyền đọc. Reference gắn section/trang mở viewer PDF có xác thực.
 - Báo cáo tạo bằng ReportRun ngay trong chat; thông tin thiếu được hỏi thêm. AI không gửi/duyệt đơn hoặc chạy SQL; bản nháp mở form nghiệp vụ để người dùng kiểm tra và gửi.

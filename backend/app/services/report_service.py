@@ -282,9 +282,12 @@ class ReportService:
     async def visible_employee_ids(
         db, user, kind: str, scope: str | None, department_id: int | None,
         start: date | None = None, end: date | None = None,
+        employee_id: int | None = None,
     ) -> tuple[str, list[int]]:
         roles = user_roles(user)
         require_reviewer_role(roles)
+        if employee_id is not None and kind not in {"ATTENDANCE", "LEAVE", "ATTENDANCE_FIX"}:
+            raise HTTPException(422, "REPORT_EMPLOYEE_FILTER_UNSUPPORTED")
         if kind == "MY_PAYSLIP":
             if scope not in {None, "SELF"} or department_id is not None:
                 raise HTTPException(status_code=403, detail="AI_ACCESS_DENIED")
@@ -316,12 +319,16 @@ class ReportService:
         requested = "DIRECT_REPORTS" if kind == "APPROVAL_QUEUE" else scope
         resolved_scope = report_scope(user, requested)
         stmt = select(Employee.employee_id)
+        if employee_id is not None:
+            stmt = stmt.where(Employee.employee_id == employee_id)
         scope_filter = employee_scope(user, resolved_scope)
         if scope_filter is not None:
             stmt = stmt.where(scope_filter)
         if department_id is not None:
             stmt = stmt.where(Employee.department_id == department_id)
         ids = list((await db.scalars(stmt.order_by(Employee.employee_id).limit(MAX_REPORT_ROWS + 1))).all())
+        if employee_id is not None and not ids:
+            raise HTTPException(404, "REPORT_UNAVAILABLE")
         return resolved_scope, check_report_size(ids)
 
     @staticmethod

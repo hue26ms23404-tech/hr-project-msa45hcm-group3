@@ -152,4 +152,6 @@ class AIReportDraftService:
     @staticmethod
     def completed_response(draft, req, run):
         scope_label = {"SELF": "bản thân", "DIRECT_REPORTS": "nhân viên trực tiếp", "COMPANY": "toàn công ty"}[req.scope]
+        if req.employee_id is not None:
+            scope_label = "nhân viên đã chọn"
         return AIChatResponse(reply=f"Đã tạo báo cáo từ {req.start_date:%d/%m/%Y} đến {req.end_date:%d/%m/%Y}, phạm vi {scope_label}. Bạn có thể xem trước và tải Excel.", action=AIChatAction(action_type="OPEN_REPORT", data={"path": "/reports", **draft.typed_params, "run_id": run.run_id}))

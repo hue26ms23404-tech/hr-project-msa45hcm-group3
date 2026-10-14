@@ -15,9 +15,12 @@ class ReportRunCreate(BaseModel):
     end_date: date
     scope: ReportScope | None = None
     department_id: int | None = Field(default=None, gt=0)
+    employee_id: int | None = Field(default=None, gt=0, strict=True)
 
     @model_validator(mode="after")
     def valid_period(self):
+        if self.employee_id is not None and self.kind not in {"ATTENDANCE", "LEAVE", "ATTENDANCE_FIX"}:
+            raise ValueError("REPORT_EMPLOYEE_FILTER_UNSUPPORTED")
         if self.end_date < self.start_date or self.start_date.year != self.end_date.year:
             raise ValueError("REPORT_PERIOD_INVALID")
         if self.kind in {"MY_PAYSLIP", "PAYROLL_SUMMARY"}:

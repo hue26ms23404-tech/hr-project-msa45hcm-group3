@@ -94,6 +94,35 @@ async def test_report_scope_escalation_rejected_before_persistence():
     db.add.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_employee_report_preserves_target_through_period_followup(monkeypatch):
+    from app.services import ai_report_draft_service as module
+    db = AsyncMock()
+    db.add = Mock()
+    owner = actor("HR")
+    create = AsyncMock(return_value={"run": SimpleNamespace(run_id="a" * 32)})
+    monkeypatch.setattr(module, "interpret_report_prompt", AsyncMock(return_value={}))
+    monkeypatch.setattr(ReportRunService, "create", create)
+    monkeypatch.setattr(AIDraftService, "mark_ready", AsyncMock())
+    response = await AIReportDraftService.start(db, owner, "Báo cáo chấm công EMP023", date(2026, 10, 14),
+                                               {"kind": "ATTENDANCE", "scope": "COMPANY", "employee_id": 23})
+    draft = db.add.call_args.args[0]
+    assert response.missing_fields == ["start_date", "end_date"]
+
+    async def update(_db, _id, _owner, params, missing):
+        draft.typed_params, draft.missing_fields = params, missing
+        draft.revision += 1
+        return draft
+
+    monkeypatch.setattr(AIDraftService, "update_draft", update)
+    response = await AIReportDraftService.continue_draft(db, owner, draft, "tháng trước", date(2026, 10, 14))
+    request = create.call_args.args[2]
+    assert request.employee_id == 23 and request.scope == "COMPANY"
+    assert request.start_date == date(2026, 9, 1) and request.end_date == date(2026, 9, 30)
+    assert response.action.data["employee_id"] == 23
+    assert "toàn công ty" not in response.reply
+
+
 def test_report_fields_and_month_parser_are_closed():
     assert report_answers("Tạo báo cáo phiếu lương của tôi tháng này", date(2026, 10, 7))["end_date"] == "2026-10-31"
     assert report_answers("tháng 9/2026", date(2026, 10, 7))["end_date"] == "2026-09-30"

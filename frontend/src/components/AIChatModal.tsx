@@ -5,7 +5,7 @@ import api from '../api/client';
 import { acceptsServerSuggestions, actorChanged, canSubmitChat, chatFailureState, newChatRequestKey, readableISODate } from '../api/aiChatState';
 import { ChatReportPreview } from './ChatReportPreview';
 import { Link, useNavigate } from 'react-router-dom';
-import type { AIChatAction, AIChatResponse, AISource, AISuggestion, AIInputOption, AIDraftInputs, AIChatRequest } from '../types/ai';
+import type { AIChatAction, AIChatResponse, AISource, AIExternalSource, AISuggestion, AIInputOption, AIDraftInputs, AIChatRequest } from '../types/ai';
 import { useAuth } from '../context/AuthContext';
 
 interface ChatMessage {
@@ -15,7 +15,15 @@ interface ChatMessage {
   action?: AIChatAction;
   timestamp: string;
   sources?: AISource[];
+  externalSources?: AIExternalSource[];
+  searchSuggestionsHtml?: string | null;
 }
+
+const suggestionLabel = (prompt: string) => prompt
+  .replace(/\s*\(tham kh\u1ea3o m\u1ee5c\s+[^)]*\)\s*$/i, '')
+  .trim();
+
+const sourceGroupKey = (source: AISource) => `${source.document_id}-${source.version_id ?? 'current'}`;
 
 interface AIChatModalProps {
   open: boolean;
@@ -106,7 +114,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: text,
+      content: suggestionId ? suggestionLabel(text) : text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -163,6 +171,8 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
         content: res.data.reply,
         action: res.data.action || undefined,
         sources: res.data.sources,
+        externalSources: res.data.external_sources || [],
+        searchSuggestionsHtml: res.data.search_suggestions_html ?? null,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
@@ -357,18 +367,53 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
                 }}
               >
                 {msg.content}
-                {!!msg.sources?.length && <div style={{ marginTop: 12 }}>
+                {!!msg.sources?.length && <div style={{ marginTop: 12, maxWidth: '100%', minWidth: 0 }}>
                   <Typography.Text strong>Tài liệu tham khảo</Typography.Text>
-                  {msg.sources.map((source, index) => <div key={`${source.document_id}-${source.section_code || index}`}>
-                    {source.viewer_path ? <Link to={source.viewer_path} onClick={onClose} style={{ display: 'block', padding: '6px 0', color: '#1677ff' }}>
-                      [{index + 1}] {source.title}<br />
-                      <span style={{ fontSize: 12 }}>Xem đúng mục: {source.heading || source.section_code} · Trang {source.page_start}{source.page_end !== source.page_start ? `–${source.page_end}` : ''}</span>
-                    </Link> : <Button type="link" style={{ padding: 0, whiteSpace: 'normal', height: 'auto' }} onClick={() => void readReference(source.document_id)}>[{index + 1}] {source.title} · Xem nội dung nguồn</Button>}
-                  </div>)}
+                  {Array.from(new Map(msg.sources.map((source) => [sourceGroupKey(source), source])).entries()).map(([groupKey, firstSource]) => {
+                    const groupSources = msg.sources!.map((source, index) => ({ source, index })).filter(({ source }) => sourceGroupKey(source) === groupKey);
+                    return <details key={groupKey} className="ai-chat-source-group" data-source-group={groupKey} style={{ marginTop: 4, minWidth: 0 }}>
+                      <summary style={{ cursor: 'pointer', color: '#1677ff', overflowWrap: 'anywhere' }}>{firstSource.title} <span style={{ color: '#64748b', fontSize: 12 }}>({groupSources.length} trích dẫn)</span></summary>
+                      <div style={{ paddingLeft: 8, minWidth: 0 }}>
+                        {groupSources.map(({ source, index }) => {
+                          const page = source.page_start == null ? null : source.page_end != null && source.page_end !== source.page_start
+                            ? `${source.page_start}–${source.page_end}` : String(source.page_start);
+                          const citation = <>
+                            <span style={{ flexShrink: 0 }}>[{index + 1}]</span>
+                            {page != null && <span style={{ flexShrink: 0, borderRadius: 10, padding: '1px 7px', background: '#f1f5f9', color: '#475569', fontSize: 11 }}>Trang {page}</span>}
+                            <span title={source.heading || undefined} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflowWrap: 'anywhere' }}>{source.heading || (source.section_code?.startsWith('PAGE_') ? 'Nội dung tài liệu' : source.section_code) || 'Nội dung tài liệu'}</span>
+                          </>;
+                          const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, padding: '5px 0', minWidth: 0, maxWidth: '100%', color: '#1677ff', fontSize: 12 };
+                          return source.viewer_path
+                            ? <Link key={`${sourceGroupKey(source)}-${source.section_id ?? index}-${index}`} to={source.viewer_path} onClick={onClose} style={rowStyle}>{citation}</Link>
+                            : <Button key={`${sourceGroupKey(source)}-${source.section_id ?? index}-${index}`} type="link" onClick={() => void readReference(source.document_id)} style={{ ...rowStyle, height: 'auto', padding: '5px 0', textAlign: 'left' }}>{citation}</Button>;
+                        })}
+                      </div>
+                    </details>;
+                  })}
                 </div>}
-
+                {!!msg.externalSources?.length && <div style={{ marginTop: 10, maxWidth: '100%', minWidth: 0 }}>
+                  <Typography.Text strong>Nguồn công khai</Typography.Text>
+                  <div style={{ marginTop: 3 }}>
+                    {msg.externalSources.map((source, index) => {
+                      let url: URL;
+                      try { url = new URL(source.url); } catch { return null; }
+                      if (url.protocol !== 'https:') return null;
+                      return <div key={`${index}-${source.url}`} style={{ fontSize: 12, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+                        <span style={{ color: '#64748b', marginRight: 5 }}>[{index + 1}]</span>
+                        <a href={url.href} target="_blank" rel="noopener noreferrer">{source.title}</a>
+                      </div>;
+                    })}
+                  </div>
+                  {msg.searchSuggestionsHtml && <iframe
+                    title="Tìm kiếm Google cho câu trả lời từ nguồn công khai"
+                    srcDoc={msg.searchSuggestionsHtml}
+                    sandbox="allow-popups allow-popups-to-escape-sandbox"
+                    referrerPolicy="no-referrer"
+                    style={{ display: 'block', width: '100%', maxWidth: '100%', height: 'min(180px, 30vh)', border: 0, marginTop: 6 }}
+                  />}
+                </div>}
                 {/* Render Suggested Action if available */}
-                {msg.action && (
+                {msg.action && msg.action.action_type !== 'SHOW_DATA' && (
                   <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed #cbd5e1' }}>
                     {(msg.action.action_type === 'DRAFT_LEAVE' || msg.action.action_type === 'DRAFT_FIX') ? <Card
                       size="small" style={{ backgroundColor: '#f8fafc', borderColor: '#dbeafe' }}
@@ -388,7 +433,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
                         style={{ marginTop: 12, height: 'auto', minHeight: 32, whiteSpace: 'normal' }}>
                         Kiểm tra và hoàn thiện đơn
                       </Button>
-                    </Card> : msg.action.action_type !== 'SHOW_DATA' && <Button
+                    </Card> : <Button
                       type="default" icon={<ThunderboltOutlined />} onClick={() => handleActionClick(msg.action!)}
                       style={{ borderColor: '#bfdbfe', color: '#1d4ed8', height: 'auto', minHeight: 36, whiteSpace: 'normal', textAlign: 'left', maxWidth: '100%' }}
                     >
@@ -455,13 +500,16 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ open, onClose }) => {
         <Button size="small" onClick={() => setSuggestionsRetry((value) => value + 1)}>Thử lại</Button>
       </Space>}
       {!activeDraftId && !suggestionsError && suggestions.length > 0 && <div style={{ margin: '10px 0 8px', flexShrink: 0 }}>
-        <Dropdown trigger={['click']} placement="topLeft"
+        <Dropdown trigger={['click']} placement="topLeft" autoAdjustOverflow
+          align={{ overflow: { adjustX: true, adjustY: true, shiftX: true, shiftY: true } }}
+          styles={{ root: { width: 'min(520px, calc(100vw - 80px))', maxWidth: 'calc(100vw - 80px)' } }}
+          popupRender={(menu) => <div className="ai-chat-suggestion-popup" style={{ width: '100%', maxHeight: 'min(320px, calc(100dvh - 160px))', overflowY: 'auto', overflowX: 'hidden', boxSizing: 'border-box' }}>{menu}</div>}
           menu={{ items: suggestions.map((suggestion) => ({
-            key: suggestion.suggestion_id, label: suggestion.prompt,
+            key: suggestion.suggestion_id, label: <span style={{ display: 'block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: '100%', lineHeight: 1.4 }}>{suggestionLabel(suggestion.prompt)}</span>,
           })), onClick: ({ key }) => {
             const suggestion = suggestions.find((item) => item.suggestion_id === key);
             if (suggestion) void handleSendMessage(suggestion.prompt, true, suggestion.catalog_version ? suggestion.suggestion_id : undefined);
-          }, style: { maxHeight: 'min(320px, 60dvh)', overflowY: 'auto', maxWidth: 'calc(100vw - 48px)' } }}>
+          }, style: { width: '100%', maxWidth: '100%', boxSizing: 'border-box' } }}>
           <Button type="text" size="small" icon={<ThunderboltOutlined />} disabled={loading} style={{ color: '#64748b' }}>Gợi ý câu hỏi</Button>
         </Dropdown>
       </div>}

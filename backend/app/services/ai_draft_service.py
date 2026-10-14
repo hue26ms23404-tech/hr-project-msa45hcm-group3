@@ -15,7 +15,7 @@ DRAFT_TTL = timedelta(minutes=15)
 COMMAND_FIELDS = {
     "DRAFT_LEAVE": frozenset({"leave_date", "session", "leave_type_id", "reason"}),
     "DRAFT_FIX": frozenset({"work_date", "event_type", "reason", "requested_time"}),
-    "DRAFT_REPORT": frozenset({"kind", "start_date", "end_date", "scope", "department_id"}),
+    "DRAFT_REPORT": frozenset({"kind", "start_date", "end_date", "scope", "department_id", "employee_id"}),
 }
 REQUIRED_FIELDS = {**COMMAND_FIELDS, "DRAFT_REPORT": frozenset({"kind", "start_date", "end_date", "scope"})}
 
@@ -35,7 +35,7 @@ class AIDraftService:
             raise HTTPException(status_code=422, detail="AI_DRAFT_FIELD_INVALID")
         try:
             for key, value in params.items():
-                if key in {"leave_type_id", "department_id"}:
+                if key in {"leave_type_id", "department_id", "employee_id"}:
                     if type(value) is not int or value <= 0:
                         raise ValueError()
                 elif not isinstance(value, str):

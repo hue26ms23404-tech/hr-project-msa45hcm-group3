@@ -78,6 +78,14 @@ async def test_switching_from_leave_draft_to_report_requires_explicit_cancel(mon
 @pytest.mark.asyncio
 @pytest.mark.parametrize("message,inputs", [
     ("Lý do: tôi muốn dùng số dư phép còn lại", None),
+    ("Lý do tôi muốn dùng số dư phép còn lại", None),
+    ("Vì tôi muốn dùng số dư phép còn lại", None),
+    ("Bởi vì tôi muốn dùng số dư phép còn lại", None),
+    ("Do tôi muốn dùng số dư phép còn lại", None),
+    ("ly do: toi muon dung so du phep con lai", None),
+    ("Cả ngày vì tôi muốn dùng số dư phép còn lại", None),
+    ("Vì tôi cần tìm hiểu chính sách nghỉ phép", None),
+    ("Vì tôi cần tạo báo cáo chấm công", None),
     ("Cho tôi xem số dư phép còn lại", {"reason": "Việc gia đình"}),
 ])
 async def test_explicit_draft_reason_not_routed_to_balance_lookup(monkeypatch, message, inputs):

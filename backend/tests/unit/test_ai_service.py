@@ -745,7 +745,7 @@ def test_personal_leave_alias_does_not_replace_policy_or_report():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("command", ["DRAFT_LEAVE", "DRAFT_FIX"])
-@pytest.mark.parametrize("prefix", ["", "lý do: ", "vì "])
+@pytest.mark.parametrize("prefix", ["", "lý do: ", "lý do ", "vì ", "bởi vì ", "do ", "ly do: ", "vi "])
 async def test_reason_turn_preserves_selected_draft_fields(monkeypatch, command, prefix):
     reason = "chăm người thân sau ca phẫu thuật buổi sáng ngày mai lúc 8h check-in"
     interpret = AsyncMock(side_effect=AssertionError("Reason text must not trigger date interpretation"))
