@@ -38,12 +38,44 @@ def _month(today: date, offset: int) -> tuple[int, int]:
     return today.year + month // 12, month % 12 + 1
 
 
+def _multiple_dates(text: str) -> bool:
+    """Detect alternatives or ranges before interpreting a single calendar day."""
+    explicit_dates = re.findall(
+        r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b"
+        r"|\b\d{1,2}\s*[/.-]\s*\d{1,2}(?:\s*[/.-]\s*\d{4})?\b"
+        r"|\b(?:ngay|mung)\s+\d{1,2}\s+thang\s+(?:\d{1,2}|sau|toi|nay|truoc)\b",
+        text,
+    )
+    # Covers 'từ 5 đến 7/11', 'từ ngày 5 tới ngày 7 tháng 11',
+    # and 'mùng 5 hoặc mùng 7'. The text is already accent-normalized.
+    numeric_pair = re.search(
+        r"\b(?:(?:ngay|mung)\s+)?\d{1,2}"
+        r"(?:\s+thang\s+(?:\d{1,2}|sau|toi|nay|truoc))?"
+        r"\s+(?:den|toi|va|hoac)\s+(?:(?:ngay|mung)\s+)?\d{1,2}\b",
+        text,
+    )
+    weekdays = re.findall(
+        r"\b(?:thu\s+(?:hai|ba|tu|nam|sau|bay)|chu nhat)\b", text
+    )
+    relative_dates = re.findall(
+        r"\b(?:hom qua|hom nay|ngay mai|ngay kia|ngay mot)\b", text
+    )
+    is_alternative = bool(re.search(r"\b(?:den|toi|va|hoac)\b", text))
+    return (
+        len(explicit_dates) > 1
+        or bool(numeric_pair)
+        or (is_alternative and len(set(weekdays)) > 1)
+        or (is_alternative and len(set(relative_dates)) > 1)
+    )
+
 def resolve_rule_date(message: str, today: date) -> DateResolution | None:
     text = normalize(message)
     text = re.sub(r"\bthu\s*([2-7])\b", lambda m: "thu " +
                   {"2": "hai", "3": "ba", "4": "tu", "5": "nam", "6": "sau", "7": "bay"}[m[1]], text)
     if re.search(r"\b(?:mot ngay nao do|tuan dau tien thang|tuan dau tien trong thang)\b", text) and not any(w in text for w in WEEKDAYS):
         return DateResolution("AMBIGUOUS", None, "RULE", "DAY_REQUIRED")
+    if _multiple_dates(text):
+        return DateResolution("AMBIGUOUS", None, "RULE", "MULTIPLE_DATES")
     # Convention: week one starts on the first Monday in the named month.
     first_week = re.search(r"\b(thu hai|thu ba|thu tu|thu nam|thu sau|thu bay|chu nhat)\b.*\b(?:tuan dau tien|tuan thu nhat)\b.*\bthang\s+(sau|toi|nay|truoc)\b", text)
     if first_week:
@@ -58,7 +90,7 @@ def resolve_rule_date(message: str, today: date) -> DateResolution | None:
         return _result(last - timedelta(days=(last.weekday() - WEEKDAYS[last_weekday[1]]) % 7))
     explicit = re.search(r"\b(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})\b", text)
     day_first = re.search(r"\b(\d{1,2})(?:\s*[/.-]\s*|\s+)(\d{1,2})(?:(?:\s*[/.-]\s*|\s+)(\d{4}))?\b", text)
-    named = re.search(r"\b(?:ngay|mung)\s+(\d{1,2})\s+thang\s+(\d{1,2})(?:\s+(?:nam\s+)?(\d{4}))?\b", text)
+    named = re.search(r"\b(?:(?:ngay|mung)\s+)?(\d{1,2})\s+thang\s+(\d{1,2})(?:\s+(?:nam\s+)?(\d{4}))?\b", text)
     relative_month = re.search(r"\b(?:ngay|mung)\s+(\d{1,2})\s+thang\s+(sau|toi|nay|truoc)\b", text)
     try:
         if explicit:
@@ -72,6 +104,8 @@ def resolve_rule_date(message: str, today: date) -> DateResolution | None:
             return _result(date(year, month, int(relative_month[1])))
     except ValueError:
         return DateResolution("INVALID", None, "RULE", "INVALID_CALENDAR_DATE")
+    if re.search(r"\bmung\s+\d{1,2}\b", text):
+        return DateResolution("AMBIGUOUS", None, "RULE", "MONTH_REQUIRED")
     offset = re.search(r"\b(\d{1,2})\s+ngay\s+(?:nua|toi)\b", text)
     if offset:
         return _result(today + timedelta(days=int(offset[1])))
@@ -97,7 +131,7 @@ async def resolve_date(message: str, today: date, context: DateContext) -> DateR
     if local and local.status in {"RESOLVED", "INVALID"}:
         record("interpret_date", "SKIPPED_DETERMINISTIC")
         return local
-    if local and local.reason_code == "DAY_REQUIRED":
+    if local and local.reason_code in {"DAY_REQUIRED", "MONTH_REQUIRED", "MULTIPLE_DATES"}:
         record("interpret_date", "SKIPPED_DETERMINISTIC", category=local.reason_code)
         return local
     if local is None:
