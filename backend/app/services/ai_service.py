@@ -20,7 +20,7 @@ from app.schemas.reports import ReportRunCreate
 from app.services.report_run_service import ReportRunService
 from app.services.ai_suggestions import SUGGESTIONS, resolve_suggestion
 from app.services.ai_report_draft_service import AIReportDraftService, suggestion_report_defaults, report_answers
-from app.services.ai_policy_answer import concise_fallback, grounded_reply, needs_draft_notice
+from app.services.ai_policy_answer import concise_fallback, grounded_reply, needs_draft_notice, PolicySearchQueries
 from app.ai.parsing.dates import DateContext, resolve_date, resolve_rule_date
 from app.ai.tool_registry import ToolContext, execute_registered
 from app.core.authorization import capabilities
@@ -408,6 +408,32 @@ class AIService:
                         seen.add(key)
                         combined.append(passage)
             passages = combined[:6]
+        # One bounded semantic query expansion only when lexical search misses
+        # an explicit policy question. This handles paraphrases/languages
+        # without a hand-maintained synonym dictionary or extra infrastructure.
+        if not passages and policy_question and not retrieval_queries and documents and settings.GEMINI_ENABLED:
+            try:
+                rewritten = await generate_json(
+                    "rewrite_policy_search",
+                    json.dumps({"question": public_question(question)}, ensure_ascii=False),
+                    "Rewrite the HR question into at most three short document search queries "
+                    "that preserve the user's meaning across colloquial, formal and multilingual "
+                    "expressions. Include Vietnamese HR terminology when suitable. Return only "
+                    "search phrases, not factual claims, legal conclusions or private identifiers.",
+                    PolicySearchQueries, timeout=settings.GEMINI_INTENT_TIMEOUT_SECONDS,
+                    max_tokens=320,
+                )
+                unique = set()
+                for phrase in rewritten.queries:
+                    if len(phrase) > 120 or phrase in unique:
+                        continue
+                    unique.add(phrase)
+                    passages.extend(retrieve(phrase, documents, limit=2))
+                    if len(passages) >= 6:
+                        break
+                passages = passages[:6]
+            except ProviderFailure:
+                record("rewrite_policy_search", "FALLBACK_USED")
         if not passages:
             if policy_question or any(term in text for term in ("noi quy", "quy dinh", "chinh sach", "gio lam viec")):
                 public_answer = await answer_public_question(question, today)
