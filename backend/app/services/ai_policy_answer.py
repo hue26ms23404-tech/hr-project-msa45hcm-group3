@@ -1,5 +1,6 @@
 """Presentation and evidence checks shared by dynamic policy answers/fallback."""
 import re
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from app.services.knowledge_retrieval import normalize, tokens
@@ -8,8 +9,7 @@ from app.services.knowledge_retrieval import normalize, tokens
 class PolicySearchQueries(BaseModel):
     """Semantic search phrases, never an executable policy decision."""
     model_config = ConfigDict(extra="forbid")
-    queries: list[StrictStr] = Field(min_length=1, max_length=3)
-
+    queries: list[Annotated[StrictStr, Field(min_length=2, max_length=120)]] = Field(min_length=1, max_length=3)
 
 
 DRAFT_NOTICE = "Có nguồn vẫn ghi là bản dự thảo hoặc có nội dung chưa xác nhận. Bạn nên xác nhận với HR trước khi áp dụng."
