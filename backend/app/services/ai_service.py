@@ -401,7 +401,7 @@ class AIService:
         passages = retrieve(question, documents)
         if retrieval_queries:
             combined, seen = [], set()
-            for query in [*retrieval_queries, question]:
+            for query in [question, *retrieval_queries[:3]]:
                 for passage in retrieve(query, documents, limit=2):
                     key = (passage.document_id, passage.version_id, passage.section_id, passage.content)
                     if key not in seen:
@@ -425,6 +425,7 @@ class AIService:
                     max_tokens=320,
                 )
                 unique = set()
+                matched_sections = set()
                 for phrase in rewritten.queries:
                     if len(phrase) > 120 or phrase in unique:
                         continue
@@ -432,7 +433,11 @@ class AIService:
                     matches = retrieve(phrase, documents, limit=2)
                     if matches:
                         matched_search_queries.append(phrase)
-                        passages.extend(matches)
+                        for passage in matches:
+                            key = (passage.document_id, passage.version_id, passage.section_id, passage.content)
+                            if key not in matched_sections:
+                                passages.append(passage)
+                                matched_sections.add(key)
                     if len(passages) >= 6:
                         break
                 passages = passages[:6]
