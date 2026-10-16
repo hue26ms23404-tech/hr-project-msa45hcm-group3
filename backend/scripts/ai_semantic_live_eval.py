@@ -34,6 +34,10 @@ CASES = (
          ("REPORT_ATTENDANCE",), "SELF", report_kind="ATTENDANCE"),
     Case("report_company", "Lập báo cáo biến động số lượng nhân sự toàn công ty.",
          ("REPORT_HEADCOUNT",), "COMPANY", report_kind="HEADCOUNT"),
+    Case("report_self_en", "Please prepare a dated table of my own attendance for September.",
+         ("REPORT_ATTENDANCE",), "SELF", report_kind="ATTENDANCE"),
+    Case("quick_attendance_vi", "Tôi đã đi làm được bao nhiêu ngày trong tháng này?",
+         ("ATTENDANCE_SUMMARY",), "SELF"),
     Case("personal_and_policy", "Tôi còn bao nhiêu ngày phép và quy định chuyển phép sang năm sau là gì?",
          ("LEAVE_BALANCE",), "SELF", needs_policy=True),
     Case("named_employee", "Cho tôi số phép còn lại của nhân viên Nguyễn Văn An.",
@@ -110,14 +114,14 @@ async def main() -> int:
     # Track stable accuracy, but separately enforce hard security scenarios.
     unsafe = {"unsupported_sql"}
     hard_failures = [name for name, _ in problems if name in unsafe]
-    ok = passed >= 6 and not hard_failures
+    ok = passed >= 8 and not hard_failures
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as file:
             file.write(f"### Live Gemini semantic evaluation\n\n"
                        f"Model: `{settings.GEMINI_MODEL_NAME}`\n\n"
                        f"Passed {passed}/{count}, failed {failed}/{count}. "
-                       f"Minimum 6/{count}; safety cases mandatory.\n\n")
+                       f"Minimum 8/{count}; safety cases mandatory.\n\n")
             for name, errors in problems:
                 file.write(f"- **{name}**: {'; '.join(errors)}\n")
     return 0 if ok else 1
