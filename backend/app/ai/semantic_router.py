@@ -4,6 +4,8 @@ from app.ai.providers.gemini import ProviderFailure, record
 from app.schemas.ai import AIChatResponse
 from app.services.ai_employee_query import EmployeeQuery, answer_employee_query, clarify, explicitly_requests_self, mentions_employee
 from app.services.ai_service import AIService
+from app.services.ai_report_draft_service import AIReportDraftService
+from app.services.report_catalog import report_catalog
 
 
 async def process_semantic_chat(db, employee_id, req, roles, owner_id, actor, today):
@@ -44,6 +46,54 @@ async def process_semantic_chat(db, employee_id, req, roles, owner_id, actor, to
     if intent in personal_intents and plan.target != "SELF":
         return clarify("TARGET_REQUIRED", "Tác vụ này cần xác định rõ đối tượng. Vui lòng chọn bản thân hoặc nêu nhân viên/phạm vi muốn xem.")
     scope = plan.target if plan.target in {"SELF", "DIRECT_REPORTS", "COMPANY"} else None
+    # Composite answers can combine a read-only business lookup with grounded
+    # policy evidence. Never auto-execute draft/report writes on policy claims:
+    # the policy document is not an executable eligibility decision.
+    if plan.needs_policy:
+        if intent not in {"LEAVE_BALANCE", "ATTENDANCE_SUMMARY"}:
+            knowledge = await AIService._answer_knowledge(
+                db, roles, today, req, policy_question=True,
+                retrieval_queries=plan.retrieval_queries)
+            if knowledge.answer_mode == "OUT_OF_SCOPE":
+                return knowledge
+            return knowledge.model_copy(update={
+                "reply": knowledge.reply + "\n\nTôi chưa thực hiện thao tác nghiệp vụ. "
+                         "Vui lòng xác nhận tác vụ riêng sau khi kiểm tra chính sách.",
+                "status": "NEEDS_INPUT", "message_code": "POLICY_ACTION_CONFIRMATION_REQUIRED",
+            })
+        business = await AIService._dispatch_free_intent(
+            db, employee_id, owner_id, roles, req, intent, actor, requested_scope=scope)
+        if business is None or business.status != "OK":
+            return business if business is not None else clarify("CLARIFICATION_REQUIRED")
+        knowledge = await AIService._answer_knowledge(
+            db, roles, today, req.model_copy(update={
+                "message": plan.policy_question or req.message,
+            }), policy_question=True, retrieval_queries=plan.retrieval_queries)
+        sources = list(business.sources)
+        used = {(s.document_id, s.version_id, s.section_id) for s in sources}
+        for source in knowledge.sources:
+            key = (source.document_id, source.version_id, source.section_id)
+            if key not in used:
+                sources.append(source)
+                used.add(key)
+        return business.model_copy(update={
+            "reply": business.reply + "\n\nChính sách liên quan:\n" + knowledge.reply,
+            "sources": sources, "answer_mode": "RAG" if knowledge.sources else business.answer_mode,
+        })
+    # Report kinds are discovered from the registered report catalog, not
+    # guessed by keyword or accepted as an unvalidated model-side command.
+    if intent.startswith("REPORT_") and plan.report_kind:
+        if actor is None:
+            return clarify("REPORT_TARGET_REQUIRED")
+        available = {entry["kind"] for entry in report_catalog(actor)["reports"]
+                     if scope in entry["scopes"]}
+        if plan.report_kind not in available:
+            return clarify("REPORT_KIND_OR_SCOPE_UNAVAILABLE",
+                           "Loại báo cáo hoặc phạm vi bạn yêu cầu không khả dụng. "
+                           "Vui lòng chọn báo cáo trong danh mục được cấp quyền.")
+        return await AIReportDraftService.start(
+            db, actor, req.message, today,
+            {"kind": plan.report_kind, "scope": scope})
     result = await AIService._dispatch_free_intent(db, employee_id, owner_id, roles, req,
                                                   intent, actor, requested_scope=scope)
     return result if result is not None else clarify("CLARIFICATION_REQUIRED")
