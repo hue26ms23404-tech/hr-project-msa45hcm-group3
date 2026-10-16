@@ -129,9 +129,6 @@ class GeminiReportInterpreter:
         if {"start_date", "end_date"} & local.keys() or text in {"ban than", "nhan vien truc tiep", "toan cong ty"}:
             record("interpret_report_filters", "SKIPPED_DETERMINISTIC")
             return {}
-        if local.get("kind") and not re.search(r"\b(tuan|quy|nam truoc|tu ngay|hom qua|hom nay)\b", text):
-            record("interpret_report_filters", "SKIPPED_DETERMINISTIC")
-            return {}
         if not message.strip():
             record("interpret_report_filters", "SKIPPED_DETERMINISTIC")
             return {}
