@@ -69,9 +69,11 @@ async def process_semantic_chat(db, employee_id, req, roles, owner_id, actor, to
             db, roles, today, req.model_copy(update={
                 "message": plan.policy_question or req.message,
             }), policy_question=True, retrieval_queries=plan.retrieval_queries)
-        sources = list(business.sources)
+        # Evidence indices [1], [2] in knowledge.reply refer to the first
+        # knowledge.sources; keep that ordering when appending business links.
+        sources = list(knowledge.sources)
         used = {(s.document_id, s.version_id, s.section_id) for s in sources}
-        for source in knowledge.sources:
+        for source in business.sources:
             key = (source.document_id, source.version_id, source.section_id)
             if key not in used:
                 sources.append(source)
