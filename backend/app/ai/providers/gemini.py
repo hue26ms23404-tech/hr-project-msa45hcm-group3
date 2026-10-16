@@ -137,6 +137,14 @@ async def generate_json(operation: str, prompt: str, instruction: str, schema: t
         raise
     except Exception as exc:
         category = classify_error(exc)
+        # Log only an exception class and numeric API status for diagnosis.
+        # Exception messages/URLs might contain tokens and are never logged.
+        api_status = exc.code if isinstance(exc, errors.APIError) and isinstance(exc.code, int) else None
+        logger.warning(json.dumps({
+            "event": "ai_provider_error_detail", "operation": operation,
+            "exception_type": type(exc).__name__, "http_status": api_status,
+            "cause_type": type(exc.__cause__).__name__ if exc.__cause__ else None,
+        }))
         record(operation, "CALLED_FAILED", int((monotonic() - started) * 1000), category)
         raise ProviderFailure(category) from exc
 
