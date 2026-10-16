@@ -31,6 +31,7 @@ class RegisteredTool:
     capability: str
     needs_employee: bool
     handler: Callable[[ToolContext], Awaitable[AIChatResponse]]
+    description: str = ""
 
 
 async def _leave_balance(ctx: ToolContext) -> AIChatResponse:
@@ -80,12 +81,32 @@ async def _open_knowledge(ctx: ToolContext) -> AIChatResponse:
 
 
 TOOLS = {
-    "LEAVE_BALANCE": RegisteredTool("leave.read_self", AIChatRequest, "leave.read_self", True, _leave_balance),
-    "ATTENDANCE_SUMMARY": RegisteredTool("attendance.read_self", AIChatRequest, "attendance.read_self", True, _attendance_summary),
-    "DRAFT_LEAVE": RegisteredTool("leave.draft_self", AIChatRequest, "leave.draft_self", True, _start_leave),
-    "DRAFT_FIX": RegisteredTool("attendance.draft_fix_self", AIChatRequest, "attendance.draft_fix_self", True, _start_fix),
-    "OPEN_KNOWLEDGE": RegisteredTool("knowledge.manage", AIChatRequest, "knowledge.manage", False, _open_knowledge),
+    "LEAVE_BALANCE": RegisteredTool("leave.read_self", AIChatRequest, "leave.read_self", True, _leave_balance,
+                                    "Read the signed-in employee's remaining leave days"),
+    "ATTENDANCE_SUMMARY": RegisteredTool("attendance.read_self", AIChatRequest, "attendance.read_self", True, _attendance_summary,
+                                         "Read the signed-in employee's attendance records"),
+    "DRAFT_LEAVE": RegisteredTool("leave.draft_self", AIChatRequest, "leave.draft_self", True, _start_leave,
+                                 "Prepare an unsubmitted leave application for the signed-in employee"),
+    "DRAFT_FIX": RegisteredTool("attendance.draft_fix_self", AIChatRequest, "attendance.draft_fix_self", True, _start_fix,
+                               "Prepare an unsubmitted attendance correction for the signed-in employee"),
+    "OPEN_KNOWLEDGE": RegisteredTool("knowledge.manage", AIChatRequest, "knowledge.manage", False, _open_knowledge,
+                                     "Open the HR document administration screen; not a policy question"),
 }
+
+
+def planning_catalog() -> list[dict[str, str]]:
+    """Trusted tool capabilities for semantic planning, not execution rights.
+
+    Adding a registered tool exposes it to the planner without maintaining a
+    separate list of natural-language intent examples.
+    """
+    return [{"tool_id": tool.tool_id, "description": tool.description}
+            for tool in TOOLS.values()]
+
+
+def intent_for_tool(tool_id: str) -> str | None:
+    return next((intent for intent, tool in TOOLS.items()
+                 if tool.tool_id == tool_id), None)
 
 
 async def execute_registered(intent: str, ctx: ToolContext) -> AIChatResponse | None:
