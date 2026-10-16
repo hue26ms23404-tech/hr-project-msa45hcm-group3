@@ -6,6 +6,7 @@ from app.services.ai_employee_query import EmployeeQuery, answer_employee_query,
 from app.services.ai_service import AIService
 from app.services.ai_report_draft_service import AIReportDraftService
 from app.services.report_catalog import report_catalog
+from app.ai.tool_registry import intent_for_tool
 
 
 async def process_semantic_chat(db, employee_id, req, roles, owner_id, actor, today):
@@ -19,6 +20,13 @@ async def process_semantic_chat(db, employee_id, req, roles, owner_id, actor, to
         )
     if plan.multiple_actions:
         return clarify("MULTIPLE_ACTIONS_REQUIRED", "Yêu cầu có nhiều tác vụ hoặc nhiều nhân viên. Bạn muốn thực hiện việc nào trước? Vui lòng chọn một tác vụ và một đối tượng.")
+    if plan.tool_id:
+        # The model may select a registered capability, never a callable or SQL.
+        # The actual tool still performs RBAC/resource checks before execution.
+        resolved = intent_for_tool(plan.tool_id)
+        if resolved is None:
+            return clarify("TOOL_UNAVAILABLE", "Chức năng được yêu cầu chưa được hỗ trợ.")
+        plan = plan.model_copy(update={"intent": resolved})
     if plan.intent == "OUT_OF_SCOPE":
         return AIChatResponse(reply="Tôi hỗ trợ nghiệp vụ HR và chính sách lao động trong phạm vi được cấp quyền.", answer_mode="OUT_OF_SCOPE")
     if plan.intent == "POLICY_QUERY":
