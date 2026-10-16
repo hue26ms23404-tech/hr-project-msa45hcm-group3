@@ -10,7 +10,7 @@ and it does not connect to production HR data.
 Each push to the branch triggers `.github/workflows/fork-ai-copilot-quality.yml`.
 Job **Offline pytest (no Gemini key)** compiles AI files and runs
 `python -m pytest -q tests/unit --disable-warnings --maxfail=10`.
-Feature flags are forced off. No Gemini key or DB service is needed for mocked unit tests.
+Feature flags are forced off. The workflow provisions a disposable PostgreSQL 16 service, runs Alembic migrations, and creates synthetic demo records for unit tests that access the database. No external database credentials or Gemini key are needed.
 
 ## 2. Opt in to LIVE Gemini semantic evaluation
 
