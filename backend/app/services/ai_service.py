@@ -11,7 +11,7 @@ from app.ai.providers.gemini import ProviderFailure, generate_json, record
 from app.core.config import settings
 from app.models.leave import LeaveType
 from app.schemas.ai import AIChatRequest, AIChatResponse, AIChatAction, AISource, AIIntentResult, AIGroundedAnswer, AIChatDateResult
-from app.services.knowledge_retrieval import retrieve, normalize
+from app.services.knowledge_retrieval import retrieve, normalize, full_policy_context
 from app.services.ai_access import require_known_role, require_reviewer_role
 from app.services.ai_employee_tool import AIEmployeeTool
 from app.services.ai_knowledge_tool import AIKnowledgeTool
@@ -408,7 +408,9 @@ class AIService:
                         seen.add(key)
                         combined.append(passage)
             passages = combined[:6]
-        if not passages:
+        whole_context = (full_policy_context(documents, settings.AI_POLICY_FULL_CONTEXT_MAX_CHARS)
+                         if policy_question and settings.GEMINI_ENABLED else [])
+        if not passages and not whole_context:
             if policy_question or any(term in text for term in ("noi quy", "quy dinh", "chinh sach", "gio lam viec")):
                 public_answer = await answer_public_question(question, today)
                 if public_answer is not None:
@@ -440,24 +442,28 @@ class AIService:
                 reply="Tôi hỗ trợ chức năng HR và các chính sách đã được công bố. Bạn muốn tra cứu phép, chấm công, đơn từ hay chính sách?",
                 message_code="CLARIFICATION_REQUIRED", status="NEEDS_INPUT",
             )
-        sources = [AISource(
-            document_id=p.document_id,
-            title=p.title,
-            excerpt=p.content,
-            source_url=p.source_url if p.version_id is None else None,
-            version_id=p.version_id,
-            section_id=p.section_id,
-            section_code=p.section_code,
-            heading=p.heading,
-            page_start=p.page_start,
-            page_end=p.page_end,
-            viewer_path=(f"/knowledge/view/{p.document_id}?version={p.version_id}&section={p.section_id}" if p.version_id and p.section_id and p.page_start else None),
-        ) for p in passages]
+        def source_for(p, excerpt=None):
+            return AISource(
+                document_id=p.document_id, title=p.title,
+                excerpt=p.content if excerpt is None else excerpt,
+                source_url=p.source_url if p.version_id is None else None,
+                version_id=p.version_id, section_id=p.section_id,
+                section_code=p.section_code, heading=p.heading,
+                page_start=p.page_start, page_end=p.page_end,
+                viewer_path=(f"/knowledge/view/{p.document_id}?version={p.version_id}&section={p.section_id}" if p.version_id and p.section_id and p.page_start else None),
+            )
+
+        sources = [source_for(p) for p in passages]
         draft_notice = needs_draft_notice(documents, passages)
-        fallback = AIChatResponse(reply=concise_fallback(question, passages, draft_notice), sources=sources, answer_mode="RAG")
+        fallback = (AIChatResponse(reply=concise_fallback(question, passages, draft_notice), sources=sources, answer_mode="RAG")
+                    if passages else AIChatResponse(
+                        reply="Hiện tôi chưa đọc được chính sách để trả lời có căn cứ. Vui lòng thử lại sau.",
+                        status="UNAVAILABLE", message_code="AI_POLICY_UNAVAILABLE"))
+        passages = whole_context or passages
+        draft_notice = needs_draft_notice(documents, passages)
         try:
             # Bound provider context; original passages remain authoritative for validation.
-            remaining = 7200  # Up to six semantic-query passages, without dropping a topic.
+            remaining = settings.AI_POLICY_FULL_CONTEXT_MAX_CHARS if whole_context else 7200
             provider_sources = []
             for i, passage in enumerate(passages, 1):
                 if remaining <= 0:
@@ -476,6 +482,19 @@ class AIService:
                 # Matching words alone do not make a PDF relevant evidence.
                 return AIChatResponse(reply=grounded_reply(answer, passages, draft_notice),
                                       answer_mode="OUT_OF_SCOPE", message_code="KNOWLEDGE_NOT_FOUND")
+            # Validate against the full source before returning only cited evidence.
+            # Compact numbering must match the frontend's source list.
+            grounded_reply(answer, passages, draft_notice)
+            if whole_context:
+                cited = list(dict.fromkeys(statement.source for statement in answer.statements))
+                sources = [source_for(passages[index - 1], "\n".join(dict.fromkeys(
+                    statement.evidence for statement in answer.statements if statement.source == index
+                ))) for index in cited]
+                passages = [passages[index - 1] for index in cited]
+                answer = answer.model_copy(update={"statements": [
+                    statement.model_copy(update={"source": cited.index(statement.source) + 1})
+                    for statement in answer.statements
+                ]})
             return AIChatResponse(reply=grounded_reply(answer, passages, draft_notice), sources=sources,
                                   answer_mode="GEMINI")
         except (ProviderFailure, ValueError) as exc:

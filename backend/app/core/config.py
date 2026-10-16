@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     GEMINI_MODEL_NAME: str = "gemini-3.6-flash"
     GEMINI_INTENT_TIMEOUT_SECONDS: float = Field(default=15, ge=5, le=30)
     GEMINI_POLICY_TIMEOUT_SECONDS: float = Field(default=15, ge=5, le=30)
+    # Small authorized policy corpora are read whole; 0 keeps lexical RAG only.
+    # Character budget, not a token count. Oversized corpora use existing RAG.
+    AI_POLICY_FULL_CONTEXT_MAX_CHARS: int = Field(default=120000, ge=0, le=200000)
     GEMINI_PUBLIC_SEARCH_ENABLED: bool = False
     # Upper bound kept at 45 so existing deployments still start; the shared
     # chat budget (budgeted_timeout) caps the effective value per request.

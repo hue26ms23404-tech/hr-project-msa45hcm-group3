@@ -35,6 +35,31 @@ def _field(record, name, default=None):
     return record.get(name, default) if isinstance(record, Mapping) else getattr(record, name, default)
 
 
+def full_policy_context(documents, max_chars: int) -> list[Passage]:
+    """Read an already authorized corpus whole, or let lexical retrieval handle it.
+
+    Never truncate sections or silently omit the tail of an oversized corpus.
+    Role, current-version and effective-date checks belong to AIKnowledgeTool.
+    """
+    if max_chars <= 0:
+        return []
+    passages = []
+    size = 0
+    for doc in documents:
+        if _field(doc, "status") != "PUBLISHED" or not _field(doc, "is_answerable", True):
+            continue
+        content = _field(doc, "content", "")
+        if not content.strip():
+            continue
+        size += len(content) + len(_field(doc, "title", "")) + len(_field(doc, "heading") or "")
+        if size > max_chars:
+            return []
+        passages.append(Passage(**{
+            name: _field(doc, name) for name in Passage.__dataclass_fields__
+        }))
+    return passages
+
+
 def retrieve(question: str, documents, limit: int = 3) -> list[Passage]:
     if limit <= 0:
         return []

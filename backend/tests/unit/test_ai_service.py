@@ -22,6 +22,92 @@ def test_retrieval_prefers_matching_heading_and_links_each_section_once():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("question", ["nghỉ đẻ", "maternity leave"])
+async def test_small_policy_corpus_reaches_model_whole_and_returns_only_cited_evidence(monkeypatch, question):
+    import json
+    from app.services import ai_service as module
+    from app.schemas.ai import AIGroundedAnswer
+    monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(module.settings, "AI_POLICY_FULL_CONTEXT_MAX_CHARS", 120000)
+    evidence = "Điều kiện hưởng chế độ thai sản phải được HR xác nhận."
+    content = "Thông tin áp dụng. " * 500 + evidence
+    documents = [
+        {"document_id": 1, "title": "Chấm công", "status": "PUBLISHED", "content": "Quẹt thẻ khi vào ca."},
+        {"document_id": 2, "title": "Nhân sự", "status": "PUBLISHED", "content": content,
+         "version_id": 5, "section_id": 8, "page_start": 3, "page_end": 4},
+    ]
+    load = AsyncMock(return_value=documents)
+    monkeypatch.setattr(AIService, "_knowledge_documents", load)
+    generate = AsyncMock(return_value=AIGroundedAnswer(statements=[
+        {"source": 2, "text": evidence, "evidence": evidence},
+    ]))
+    monkeypatch.setattr(module, "generate_json", generate)
+    result = await AIService._answer_knowledge(None, {"EMPLOYEE"}, date(2026, 10, 16),
+        AIChatRequest(message=question), policy_question=True)
+    load.assert_awaited_once_with(None, {"EMPLOYEE"}, date(2026, 10, 16))
+    payload = json.loads(generate.await_args.args[1])
+    assert payload["sources"][1]["text"] == content  # Includes the tail beyond 7200 characters.
+    assert result.reply == evidence + " [1]"
+    assert len(result.sources) == 1 and result.sources[0].excerpt == evidence
+    assert result.sources[0].viewer_path == "/knowledge/view/2?version=5&section=8"
+
+
+def test_full_policy_context_is_all_or_nothing_and_excludes_unpublished_sections():
+    from app.services.knowledge_retrieval import full_policy_context
+    docs = [{"document_id": 1, "title": "HR", "status": "PUBLISHED", "content": "abc"},
+            {"document_id": 2, "title": "HR", "status": "PUBLISHED", "content": "def"},
+            {"document_id": 3, "title": "HR", "status": "DRAFT", "content": "private"},
+            {"document_id": 4, "title": "HR", "status": "PUBLISHED", "is_answerable": False, "content": "private"}]
+    assert full_policy_context(docs, 0) == []
+    assert full_policy_context(docs, 9) == []
+    assert [p.document_id for p in full_policy_context(docs, 10)] == [1, 2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["timeout", "invalid_evidence", "no_answer"])
+async def test_full_policy_context_never_returns_unverified_corpus_as_answer(monkeypatch, failure):
+    from app.services import ai_service as module
+    from app.schemas.ai import AIGroundedAnswer
+    from app.ai.providers.gemini import ProviderFailure
+    monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(module.settings, "GEMINI_PUBLIC_SEARCH_ENABLED", False)
+    monkeypatch.setattr(module.settings, "AI_POLICY_FULL_CONTEXT_MAX_CHARS", 120000)
+    monkeypatch.setattr(AIService, "_knowledge_documents", AsyncMock(return_value=[{
+        "document_id": 1, "title": "HR", "status": "PUBLISHED", "content": "Chế độ thai sản."
+    }]))
+    answer = AIGroundedAnswer(statements=[] if failure == "no_answer" else [
+        {"source": 1, "text": "Không có căn cứ", "evidence": "Không nằm trong nguồn"}])
+    generate = AsyncMock(return_value=answer,
+        side_effect=ProviderFailure("PROVIDER_TIMEOUT") if failure == "timeout" else None)
+    monkeypatch.setattr(module, "generate_json", generate)
+    result = await AIService._answer_knowledge(None, {"EMPLOYEE"}, date(2026, 10, 16),
+        AIChatRequest(message="maternity leave"), policy_question=True)
+    assert result.sources == [] and result.action is None
+    assert result.message_code == ("KNOWLEDGE_NOT_FOUND" if failure == "no_answer" else "AI_POLICY_UNAVAILABLE")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", [0, 30])
+async def test_large_or_disabled_full_context_uses_existing_lexical_rag(monkeypatch, budget):
+    import json
+    from app.services import ai_service as module
+    from app.schemas.ai import AIGroundedAnswer
+    monkeypatch.setattr(module.settings, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(module.settings, "GEMINI_PUBLIC_SEARCH_ENABLED", False)
+    monkeypatch.setattr(module.settings, "AI_POLICY_FULL_CONTEXT_MAX_CHARS", budget)
+    content = "Chính sách nghỉ phép năm. " * 400
+    monkeypatch.setattr(AIService, "_knowledge_documents", AsyncMock(return_value=[{
+        "document_id": 1, "title": "HR", "status": "PUBLISHED", "content": content
+    }]))
+    generate = AsyncMock(return_value=AIGroundedAnswer(statements=[]))
+    monkeypatch.setattr(module, "generate_json", generate)
+    await AIService._answer_knowledge(None, {"EMPLOYEE"}, date(2026, 10, 16),
+        AIChatRequest(message="nghỉ phép năm"), policy_question=True)
+    sources = json.loads(generate.await_args.args[1])["sources"]
+    assert len(sources) == 3 and all(len(s["text"]) <= 1200 for s in sources)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("question", [
     "Chính sách xin nghỉ phép như thế nào?",
     "Quy trình tạo đơn nghỉ phép là gì?",

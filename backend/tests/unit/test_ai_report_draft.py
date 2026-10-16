@@ -344,24 +344,45 @@ async def test_report_draft_passes_stable_idempotency_key(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_report_interpreter_never_forwards_non_temporal_private_text(monkeypatch):
+async def test_report_interpreter_preserves_request_but_masks_identifiers_and_reason(monkeypatch):
     from app.services import ai_report_interpreter as module
     from app.schemas.reports import ReportKind
-    from app.services.ai_report_interpreter import GeminiReportInterpreter, report_temporal_hint
+    from app.services.ai_report_interpreter import GeminiReportInterpreter
     from app.schemas.reports import ReportScope
     from app.services.ai_report_interpreter import ReportPromptResult
     import json
 
     secret = "đang điều trị ung thư, Nguyễn An, ann@example.com"
-    message = "Tạo báo cáo công từ thứ hai tuần liền kề do tôi " + secret
-    assert report_temporal_hint(message) == "tu thu hai tuan lien ke"
+    message = "Tạo báo cáo công cho Nguyễn An ann@example.com 0901234567 từ thứ hai tuần liền kề do tôi " + secret
     generate = AsyncMock(return_value=ReportPromptResult())
     monkeypatch.setattr(module, "generate_json", generate)
     result = await GeminiReportInterpreter().interpret(message, date(2026, 10, 14), actor())
     assert result == {}
     provider_payload = json.loads(generate.await_args.args[1])
-    assert provider_payload["date_hint"] == "tu thu hai tuan lien ke"
-    assert "message" not in provider_payload
-    assert "ung thu" not in generate.await_args.args[1]
+    assert "từ thứ hai tuần liền kề" in provider_payload["message"]
+    assert "ung thư" not in generate.await_args.args[1]
     assert "Nguyễn An" not in generate.await_args.args[1]
     assert "example.com" not in generate.await_args.args[1]
+    assert "0901234567" not in generate.await_args.args[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", [
+    "Attendance report for last week",
+    "Báo cáo chấm công last week",
+    "Move it back one week",
+    "Báo cáo công phạm vi nhóm cho tuần liền trước",
+])
+async def test_report_interpreter_keeps_language_and_current_period(monkeypatch, message):
+    import json
+    from app.services import ai_report_interpreter as module
+    current = {"kind": "ATTENDANCE", "scope": "SELF",
+               "start_date": "2026-10-12", "end_date": "2026-10-18", "employee_id": 7}
+    generate = AsyncMock(return_value=module.ReportPromptResult(
+        start_date="2026-10-05", end_date="2026-10-11", scope="COMPANY"))
+    monkeypatch.setattr(module, "generate_json", generate)
+    result = await module.GeminiReportInterpreter().interpret(message, date(2026, 10, 16), actor(), current)
+    payload = json.loads(generate.await_args.args[1])
+    assert payload["message"] == message
+    assert payload["current_filters"] == {k: v for k, v in current.items() if k != "employee_id"}
+    assert result == {"start_date": "2026-10-05", "end_date": "2026-10-11"}
