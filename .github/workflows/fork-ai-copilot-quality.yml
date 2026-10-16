@@ -86,6 +86,7 @@ jobs:
     steps:
       - name: Check opt-in and Gemini environment readiness
         shell: bash
+        working-directory: .
         run: |
           if [[ "$AI_LIVE_TESTS_ENABLED" != 'true' ]]; then
             echo "::notice::Live evaluation disabled. Set AI_LIVE_TESTS_ENABLED=true in repository or ai-research environment Variables."
