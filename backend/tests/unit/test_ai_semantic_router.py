@@ -287,3 +287,19 @@ async def test_policy_plus_draft_does_not_execute_unverified_action(monkeypatch)
     assert result.message_code == "POLICY_ACTION_DEFERRED"
     assert result.action is None
     dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plan", [
+    ChatPlan(intent="REPORT_ATTENDANCE", target="SELF", report_kind="LEAVE", tool_id="leave.read_self"),
+    ChatPlan(intent="REPORT_ATTENDANCE", target="SELF", tool_id="leave.read_self"),
+])
+async def test_conflicting_model_plan_does_not_run_registered_tools(monkeypatch, plan):
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(return_value=plan))
+    dispatch = AsyncMock(side_effect=AssertionError("Contradictory plan"))
+    monkeypatch.setattr(AIService, "_dispatch_free_intent", dispatch)
+    result = await AIService.process_chat(AsyncMock(), 7,
+        AIChatRequest(message="Xem báo cáo chấm công của tôi"),
+        {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
+    assert result.message_code == "PLAN_CONFLICT"
+    dispatch.assert_not_called()
