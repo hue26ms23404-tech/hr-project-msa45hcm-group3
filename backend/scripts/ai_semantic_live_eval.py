@@ -4,7 +4,6 @@ Run only with GEMINI_ENABLED=true, GEMINI_SEMANTIC_ENABLED=true,
 GEMINI_API_KEY and GEMINI_MODEL_NAME set. Does not create reports or drafts.
 """
 import asyncio
-import json
 import os
 import sys
 from dataclasses import dataclass
@@ -105,12 +104,12 @@ async def main() -> int:
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as file:
-            file.write(f"### Live Gemini semantic evaluation\\n\\n"
-                       f"Model: \`{settings.GEMINI_MODEL_NAME}\`\\n\\n"
+            file.write(f"### Live Gemini semantic evaluation\n\n"
+                       f"Model: `{settings.GEMINI_MODEL_NAME}`\n\n"
                        f"Passed {passed}/{count}, failed {failed}/{count}. "
-                       f"Minimum 6/{count}; safety cases mandatory.\\n\\n")
+                       f"Minimum 6/{count}; safety cases mandatory.\n\n")
             for name, errors in problems:
-                file.write(f"- **{name}**: {'; '.join(errors)}\\n")
+                file.write(f"- **{name}**: {'; '.join(errors)}\n")
     return 0 if ok else 1
 
 
