@@ -851,3 +851,18 @@ async def test_replayed_completed_leave_draft_returns_prepared_form_without_muta
     assert response.action.action_type == "DRAFT_LEAVE"
     assert response.action.data["leave_date"] == values["leave_date"]
     continuation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_report_interpreter_uses_gemini_for_missing_month_even_if_kind_is_known(monkeypatch):
+    from app.services import ai_report_interpreter as module
+    monkeypatch.setattr(module, "report_catalog", lambda actor: {
+        "reports": [{"kind": "ATTENDANCE", "scopes": ["SELF"]}]})
+    resolve = AsyncMock(return_value=module.ReportPromptResult(
+        start_date="2026-09-01", end_date="2026-09-30"))
+    monkeypatch.setattr(module, "generate_json", resolve)
+    result = await module.GeminiReportInterpreter().interpret(
+        "Tạo báo cáo chấm công tháng 9", date(2026, 10, 16), object())
+    assert result == {"start_date": "2026-09-01", "end_date": "2026-09-30"}
+    assert resolve.await_args.args[0] == "interpret_report_filters"
+
