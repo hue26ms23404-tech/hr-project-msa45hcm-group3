@@ -18,6 +18,20 @@ jobs:
     if: github.repository == 'hue26ms23404-tech/hr-project-msa45hcm-group3'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hr_user
+          POSTGRES_PASSWORD: hr_secret_password
+          POSTGRES_DB: hr_management_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hr_user -d hr_management_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
@@ -28,6 +42,8 @@ jobs:
       ENVIRONMENT: test
       PYTHONDONTWRITEBYTECODE: '1'
       PYTHONUNBUFFERED: '1'
+      DATABASE_URL: postgresql+asyncpg://hr_user:hr_secret_password@127.0.0.1:5432/hr_management_db
+      SYNC_DATABASE_URL: postgresql+psycopg2://hr_user:hr_secret_password@127.0.0.1:5432/hr_management_db
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,6 +55,10 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend requirements
         run: python -m pip install -r requirements.txt
+      - name: Prepare ephemeral PostgreSQL schema and synthetic seed data
+        run: |
+          python -m alembic upgrade head
+          python -m app.scripts.seed_data
       - name: Compile AI code and tests
         run: python -m compileall -q app/ai app/services/ai_service.py app/services/ai_policy_answer.py app/services/ai_report_interpreter.py scripts/ai_semantic_live_eval.py tests/unit
       - name: Run offline unit regression tests
