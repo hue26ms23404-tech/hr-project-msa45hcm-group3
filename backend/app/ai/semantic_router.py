@@ -66,8 +66,8 @@ async def process_semantic_chat(db, employee_id, req, roles, owner_id, actor, to
                 return knowledge
             return knowledge.model_copy(update={
                 "reply": knowledge.reply + "\n\nTôi chưa thực hiện thao tác nghiệp vụ. "
-                         "Vui lòng xác nhận tác vụ riêng sau khi kiểm tra chính sách.",
-                "status": "NEEDS_INPUT", "message_code": "POLICY_ACTION_CONFIRMATION_REQUIRED",
+                         "Nếu muốn tiếp tục, hãy gửi riêng yêu cầu tạo báo cáo hoặc soạn bản nháp.",
+                "message_code": "POLICY_ACTION_DEFERRED",
             })
         business = await AIService._dispatch_free_intent(
             db, employee_id, owner_id, roles, req, intent, actor, requested_scope=scope)
