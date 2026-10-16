@@ -1,7 +1,15 @@
 """Presentation and evidence checks shared by dynamic policy answers/fallback."""
 import re
 
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from app.services.knowledge_retrieval import normalize, tokens
+
+
+class PolicySearchQueries(BaseModel):
+    """Semantic search phrases, never an executable policy decision."""
+    model_config = ConfigDict(extra="forbid")
+    queries: list[StrictStr] = Field(min_length=1, max_length=3)
+
 
 
 DRAFT_NOTICE = "Có nguồn vẫn ghi là bản dự thảo hoặc có nội dung chưa xác nhận. Bạn nên xác nhận với HR trước khi áp dụng."
@@ -31,12 +39,19 @@ def concise_fallback(question, passages, draft_notice=False):
     candidates = []
     for source, passage in enumerate(passages, 1):
         for heading, body in _blocks(passage.content):
-            for match in re.finditer(r".+?(?:[.!?](?=\s|$)|$)", body, re.DOTALL):
-                sentence = " ".join(match.group().split())
-                if not sentence or len(sentence) > 400 or sentence[-1] not in ".!?":
-                    continue  # Never paste a truncated sentence or a full PDF page.
+            # Preserve original source wording. PDF lines often omit periods,
+            # so accept complete bounded lines in addition to sentence spans.
+            spans = []
+            for line in body.splitlines():
+                if 24 <= len(line.strip()) <= 400:
+                    spans.append(line.strip())
+                spans.extend(re.split(r"(?<=[.!?])\s+", line.strip()))
+            for span in spans:
+                sentence = " ".join(span.split())
+                if not 24 <= len(sentence) <= 400:
+                    continue
                 overlap = query & tokens(sentence)
-                if overlap:
+                if overlap or query & tokens(heading):
                     score = len(overlap) + len(query & tokens(heading))
                     candidates.append((score, source, sentence))
     candidates.sort(key=lambda item: item[0], reverse=True)
