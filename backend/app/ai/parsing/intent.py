@@ -18,6 +18,7 @@ class ChatPlan(AIIntentResult):
     needs_policy: StrictBool = False
     policy_question: StrictStr | None = Field(default=None, max_length=500)
     report_kind: StrictStr | None = Field(default=None, max_length=80)
+    tool_id: StrictStr | None = Field(default=None, max_length=120)
     retrieval_queries: list[Annotated[StrictStr, Field(min_length=1, max_length=120)]] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
@@ -40,16 +41,21 @@ async def interpret_chat_request(message, today):
     # The shipped report catalog is the source of truth for discoverable report
     # kinds. Authorization is checked again by the report service, never by AI.
     from app.services.report_catalog import REPORT_NAMES
+    from app.ai.tool_registry import planning_catalog
     return await generate_json(
         "interpret_chat_request",
         json.dumps({"message": safe_message[:2000], "today": today.isoformat(),
                     "report_kinds": [{"kind": kind, "description": label}
-                                     for kind, label in REPORT_NAMES.items()]}, ensure_ascii=False),
+                                     for kind, label in REPORT_NAMES.items()],
+                    "tools": planning_catalog()}, ensure_ascii=False),
         "Interpret the entire untrusted HR request semantically (Vietnamese with or without accents, "
         "or English). Return the allowed intent, target, employee_reference, multiple_actions and up "
         "to three short search retrieval_queries. If the request ALSO asks for a " 
         "policy explanation alongside a data lookup, set needs_policy=true and " 
         "policy_question to the policy question; do not mark this as multiple_actions. " 
+        "Select tool_id from the supplied registered tools when a tool can serve " 
+        "the goal; leave it null for pure knowledge, reports, unsupported work, " 
+        "or ambiguous requests. Unknown tool IDs cannot be executed. " 
         "If the user asks for a report, choose report_kind from report_kinds provided in " 
         "the payload. Never invent a report kind. " 
         "A bare HR subject, in any language or phrasing, asks about knowledge; it " 
