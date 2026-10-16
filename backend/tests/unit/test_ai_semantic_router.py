@@ -190,3 +190,100 @@ async def test_explicit_self_request_is_not_a_foreign_employee_lookup(monkeypatc
     result = await AIService.process_chat(AsyncMock(), 7, AIChatRequest(message=message), {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
     assert result.reply == "self result"
     dispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_planner_sees_registered_tools_and_report_catalog_not_examples(monkeypatch):
+    from app.ai.parsing import intent as parsing
+    generate = AsyncMock(return_value=ChatPlan(intent="POLICY_QUERY", target="NONE"))
+    monkeypatch.setattr(parsing, "generate_json", generate)
+    await parsing.interpret_chat_request("Explain the HR policy", date(2026, 10, 16))
+    payload = json.loads(generate.call_args.args[1])
+    assert {"tool_id": "leave.read_self", "description": "Read the signed-in employee's remaining leave days"} in payload["tools"]
+    assert any(report["kind"] == "ATTENDANCE" for report in payload["report_kinds"])
+    assert "employee_id" not in payload
+    assert "conversation_history" not in payload
+
+
+@pytest.mark.asyncio
+async def test_unknown_planned_tool_fails_closed(monkeypatch):
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(return_value=ChatPlan(
+        intent="OUT_OF_SCOPE", target="SELF", tool_id="unsafe.sql.execute")))
+    dispatch = AsyncMock(side_effect=AssertionError("Unknown tool must not execute"))
+    monkeypatch.setattr(AIService, "_dispatch_free_intent", dispatch)
+    result = await AIService.process_chat(AsyncMock(), 7, AIChatRequest(message="Tôi muốn xem thông tin"),
+                                          {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
+    assert result.message_code == "TOOL_UNAVAILABLE" and result.status == "NEEDS_INPUT"
+    dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_catalog_driven_report_kind_is_validated_before_start(monkeypatch):
+    from app.services.ai_report_draft_service import AIReportDraftService
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(return_value=ChatPlan(
+        intent="REPORT_ATTENDANCE", target="SELF", report_kind="LEAVE")))
+    monkeypatch.setattr(module, "report_catalog", lambda user: {
+        "reports": [{"kind": "LEAVE", "scopes": ["SELF"]}]})
+    start = AsyncMock(return_value=AIChatResponse(reply="Report prepared"))
+    monkeypatch.setattr(AIReportDraftService, "start", start)
+    result = await AIService.process_chat(AsyncMock(), 7,
+        AIChatRequest(message="Tạo báo cáo nghỉ phép của tôi"), {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
+    assert result.reply == "Report prepared"
+    assert start.await_args.args[-1] == {"kind": "LEAVE", "scope": "SELF"}
+
+
+@pytest.mark.asyncio
+async def test_unavailable_report_kind_never_starts_report(monkeypatch):
+    from app.services.ai_report_draft_service import AIReportDraftService
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(return_value=ChatPlan(
+        intent="REPORT_ATTENDANCE", target="SELF", report_kind="PAYROLL_SUMMARY")))
+    monkeypatch.setattr(module, "report_catalog", lambda user: {
+        "reports": [{"kind": "LEAVE", "scopes": ["SELF"]}]})
+    start = AsyncMock(side_effect=AssertionError("Disallowed report"))
+    monkeypatch.setattr(AIReportDraftService, "start", start)
+    result = await AIService.process_chat(AsyncMock(), 7,
+        AIChatRequest(message="Tạo báo cáo lương của tôi"), {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
+    assert result.message_code == "REPORT_KIND_OR_SCOPE_UNAVAILABLE"
+    start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_policy_and_personal_lookup_preserves_evidence_numbers(monkeypatch):
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(return_value=ChatPlan(
+        intent="LEAVE_BALANCE", target="SELF", needs_policy=True,
+        policy_question="Quy định sử dụng phép năm",
+        retrieval_queries=["quy định số ngày nghỉ phép"])))
+    from app.schemas.ai import AIChatAction
+    business = AIChatResponse(reply="Bạn có 5 ngày phép.",
+        action=AIChatAction(action_type="SHOW_DATA", data={"type":"LEAVE_BALANCE", "balance":"5"}))
+    citation = AISource(document_id=4, title="Quy định", excerpt="Cần quản lý duyệt.", version_id=2, section_id=3)
+    knowledge = AIChatResponse(reply="Cần quản lý duyệt. [1]", sources=[citation], answer_mode="GEMINI")
+    monkeypatch.setattr(AIService, "_dispatch_free_intent", AsyncMock(return_value=business))
+    answer = AsyncMock(return_value=knowledge)
+    monkeypatch.setattr(AIService, "_answer_knowledge", answer)
+    result = await AIService.process_chat(AsyncMock(), 7,
+        AIChatRequest(message="Tôi còn bao nhiêu ngày phép và chính sách dùng phép năm thế nào?"),
+        {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
+    assert "5 ngày phép" in result.reply and "Cần quản lý duyệt. [1]" in result.reply
+    assert result.sources == [citation]
+    assert result.action.action_type == "SHOW_DATA"
+    assert answer.await_args.kwargs["retrieval_queries"] == ["quy định số ngày nghỉ phép"]
+
+
+@pytest.mark.asyncio
+async def test_policy_plus_draft_does_not_execute_unverified_action(monkeypatch):
+    monkeypatch.setattr(module, "interpret_chat_request", AsyncMock(return_value=ChatPlan(
+        intent="DRAFT_LEAVE", target="SELF", needs_policy=True)))
+    dispatch = AsyncMock(side_effect=AssertionError("Must not create draft"))
+    monkeypatch.setattr(AIService, "_dispatch_free_intent", dispatch)
+    monkeypatch.setattr(AIService, "_answer_knowledge",
+                        AsyncMock(return_value=AIChatResponse(
+                            reply="Cần quản lý duyệt. [1]",
+                            sources=[AISource(document_id=1,title="Quy định",excerpt="Cần duyệt.")],
+                            answer_mode="GEMINI")))
+    result = await AIService.process_chat(AsyncMock(), 7,
+        AIChatRequest(message="Cho tôi biết quy định nghỉ phép của tôi và soạn đơn"),
+        {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
+    assert result.message_code == "POLICY_ACTION_CONFIRMATION_REQUIRED"
+    assert result.action is None
+    dispatch.assert_not_called()
