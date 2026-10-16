@@ -79,7 +79,17 @@ async def main() -> int:
     problems = []
     for case in CASES:
         try:
-            plan = await interpret_chat_request(case.prompt, date(2026, 10, 16))
+            # Retry one transient network/provider failure. Never retry auth,
+            # quota, invalid model, or schema errors as if they were misclassified.
+            for attempt in range(2):
+                try:
+                    plan = await interpret_chat_request(case.prompt, date(2026, 10, 16))
+                    break
+                except ProviderFailure as exc:
+                    if exc.category != "NETWORK_ERROR" or attempt == 1:
+                        raise
+                    print(f"RETRY_NETWORK case={case.case_id}")
+                    await asyncio.sleep(1)
         except ProviderFailure as exc:
             print(f"PROVIDER_ERROR case={case.case_id} category={exc.category}")
             return 2  # Model, auth, quota or network failures are NOT accuracy failures.
