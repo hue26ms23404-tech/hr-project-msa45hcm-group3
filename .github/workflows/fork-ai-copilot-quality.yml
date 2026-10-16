@@ -1,0 +1,77 @@
+name: Fork AI Copilot Quality
+
+on:
+  push:
+    branches:
+      - research/ai-intent-policy-lazycode-20261016
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-research-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-regression:
+    name: Offline pytest (no Gemini key)
+    if: github.repository == 'hue26ms23404-tech/hr-project-msa45hcm-group3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      GEMINI_ENABLED: 'false'
+      GEMINI_SEMANTIC_ENABLED: 'false'
+      GEMINI_PUBLIC_SEARCH_ENABLED: 'false'
+      ENVIRONMENT: test
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend requirements
+        run: python -m pip install -r requirements.txt
+      - name: Compile AI code and tests
+        run: python -m compileall -q app/ai app/services/ai_service.py app/services/ai_policy_answer.py app/services/ai_report_interpreter.py scripts/ai_semantic_live_eval.py tests/unit
+      - name: Run offline unit regression tests
+        run: python -m pytest -q tests/unit --disable-warnings --maxfail=10
+
+  live-gemini:
+    name: Gemini live semantic evaluation (opt-in)
+    needs: offline-regression
+    if: github.repository == 'hue26ms23404-tech/hr-project-msa45hcm-group3' && github.ref == 'refs/heads/research/ai-intent-policy-lazycode-20261016' && vars.AI_LIVE_TESTS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: ai-research
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      ENVIRONMENT: test
+      GEMINI_ENABLED: 'true'
+      GEMINI_SEMANTIC_ENABLED: 'true'
+      GEMINI_PUBLIC_SEARCH_ENABLED: 'false'
+      GEMINI_MODEL_NAME: ${{ vars.AI_GEMINI_MODEL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend requirements
+        run: python -m pip install -r requirements.txt
+      - name: Evaluate Gemini planner on synthetic HR prompts
+        run: python scripts/ai_semantic_live_eval.py
