@@ -70,3 +70,15 @@ including report discovery and a combined policy-and-database question.
 It does not prove end-to-end report execution, retrieved policy correctness,
 conflict resolution, full conversation memory, or live database permission safety.
 Those require separately authorized, isolated integration fixtures and tests.
+
+## Evaluation handoff
+
+Once the two repository variables and environment secret are configured, a new
+push to this research branch starts the live test after the offline suite.
+Inspect the **Gemini live semantic evaluation (opt-in)** job to distinguish:
+- **skipped:** `AI_LIVE_TESTS_ENABLED` not set to `true`, branch guard, or offline failure.
+- **PROVIDER_ERROR:** API key, model availability, quota, or timeout. Do not alter expected intent labels to hide these errors.
+- **FAIL case=...:** semantic planner output differs from a synthetic gold case. Investigate the model plan and backend dispatch separately, without adding hardcoded synonyms.
+- **PASS:** eight synthetic intent cases were evaluated. This does not assert policy correctness or authorization of real HR records.
+
+The key is never written to logs; keep production employee text out of this evaluation.
