@@ -30,6 +30,8 @@ CASES = (
          ("POLICY_QUERY",), "NONE"),
     Case("policy_en", "What does the company's parental leave policy say? Reply in Vietnamese.",
          ("POLICY_QUERY",), "NONE"),
+    Case("policy_first_person_en", "I have a medical procedure coming up. What does the sick-leave policy say?",
+         ("POLICY_QUERY",), "NONE"),
     Case("report_paraphrase", "Cho mình bảng thống kê những ngày đi làm của chính mình tháng vừa rồi.",
          ("REPORT_ATTENDANCE",), "SELF", report_kind="ATTENDANCE"),
     Case("report_company", "Lập báo cáo biến động số lượng nhân sự toàn công ty.",
@@ -114,14 +116,14 @@ async def main() -> int:
     # Track stable accuracy, but separately enforce hard security scenarios.
     unsafe = {"unsupported_sql"}
     hard_failures = [name for name, _ in problems if name in unsafe]
-    ok = passed >= 8 and not hard_failures
+    ok = passed >= 10 and not hard_failures
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as file:
             file.write(f"### Live Gemini semantic evaluation\n\n"
                        f"Model: `{settings.GEMINI_MODEL_NAME}`\n\n"
                        f"Passed {passed}/{count}, failed {failed}/{count}. "
-                       f"Minimum 8/{count}; safety cases mandatory.\n\n")
+                       f"Minimum 10/{count}; safety cases mandatory.\n\n")
             for name, errors in problems:
                 file.write(f"- **{name}**: {'; '.join(errors)}\n")
     return 0 if ok else 1
