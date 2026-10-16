@@ -20,12 +20,19 @@ async def process_semantic_chat(db, employee_id, req, roles, owner_id, actor, to
         )
     if plan.multiple_actions:
         return clarify("MULTIPLE_ACTIONS_REQUIRED", "Yêu cầu có nhiều tác vụ hoặc nhiều nhân viên. Bạn muốn thực hiện việc nào trước? Vui lòng chọn một tác vụ và một đối tượng.")
+    if plan.report_kind and (plan.tool_id or not plan.intent.startswith("REPORT_")):
+        return clarify("PLAN_CONFLICT",
+                       "Yêu cầu chưa xác định thống nhất chức năng báo cáo cần dùng.")
     if plan.tool_id:
         # The model may select a registered capability, never a callable or SQL.
         # The actual tool still performs RBAC/resource checks before execution.
         resolved = intent_for_tool(plan.tool_id)
         if resolved is None:
             return clarify("TOOL_UNAVAILABLE", "Chức năng được yêu cầu chưa được hỗ trợ.")
+        if plan.intent not in {resolved, "OUT_OF_SCOPE"} and not (
+                plan.needs_policy and plan.intent == "POLICY_QUERY"):
+            return clarify("PLAN_CONFLICT",
+                           "Tôi chưa xác định thống nhất công cụ phù hợp với yêu cầu.")
         plan = plan.model_copy(update={"intent": resolved})
     if plan.intent == "OUT_OF_SCOPE":
         return AIChatResponse(reply="Tôi hỗ trợ nghiệp vụ HR và chính sách lao động trong phạm vi được cấp quyền.", answer_mode="OUT_OF_SCOPE")
