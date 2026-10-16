@@ -408,6 +408,7 @@ class AIService:
                         seen.add(key)
                         combined.append(passage)
             passages = combined[:6]
+        matched_search_queries = []
         # One bounded semantic query expansion only when lexical search misses
         # an explicit policy question. This handles paraphrases/languages
         # without a hand-maintained synonym dictionary or extra infrastructure.
@@ -428,7 +429,10 @@ class AIService:
                     if len(phrase) > 120 or phrase in unique:
                         continue
                     unique.add(phrase)
-                    passages.extend(retrieve(phrase, documents, limit=2))
+                    matches = retrieve(phrase, documents, limit=2)
+                    if matches:
+                        matched_search_queries.append(phrase)
+                        passages.extend(matches)
                     if len(passages) >= 6:
                         break
                 passages = passages[:6]
@@ -480,7 +484,8 @@ class AIService:
             viewer_path=(f"/knowledge/view/{p.document_id}?version={p.version_id}&section={p.section_id}" if p.version_id and p.section_id and p.page_start else None),
         ) for p in passages]
         draft_notice = needs_draft_notice(documents, passages)
-        fallback = AIChatResponse(reply=concise_fallback(question, passages, draft_notice), sources=sources, answer_mode="RAG")
+        fallback_query = " ".join([question, *(retrieval_queries or []), *matched_search_queries])
+        fallback = AIChatResponse(reply=concise_fallback(fallback_query, passages, draft_notice), sources=sources, answer_mode="RAG")
         try:
             # Bound provider context; original passages remain authoritative for validation.
             remaining = 7200  # Up to six semantic-query passages, without dropping a topic.
