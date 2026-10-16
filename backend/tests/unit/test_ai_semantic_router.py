@@ -284,6 +284,6 @@ async def test_policy_plus_draft_does_not_execute_unverified_action(monkeypatch)
     result = await AIService.process_chat(AsyncMock(), 7,
         AIChatRequest(message="Cho tôi biết quy định nghỉ phép của tôi và soạn đơn"),
         {"EMPLOYEE"}, 9, actor("EMPLOYEE"))
-    assert result.message_code == "POLICY_ACTION_CONFIRMATION_REQUIRED"
+    assert result.message_code == "POLICY_ACTION_DEFERRED"
     assert result.action is None
     dispatch.assert_not_called()
