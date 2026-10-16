@@ -424,6 +424,10 @@ class AIService:
                     PolicySearchQueries, timeout=settings.GEMINI_INTENT_TIMEOUT_SECONDS,
                     max_tokens=320,
                 )
+                # Guard against unexpected provider/mocked responses: a search
+                # rewrite must never bypass document-grounded answering.
+                if not isinstance(rewritten, PolicySearchQueries):
+                    raise ProviderFailure("SCHEMA_VALIDATION_FAILED")
                 unique = set()
                 matched_sections = set()
                 for phrase in rewritten.queries:
